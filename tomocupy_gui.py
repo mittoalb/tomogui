@@ -308,7 +308,6 @@ class TomoCuPyGUI(QWidget):
         elif self.preview_files and 0 <= self.slice_slider.value() < len(self.preview_files):
             self.show_image(self.preview_files[self.slice_slider.value()])
 
-
     # Highlight border on focus
     def highlight_editor(self, editor, event):
         editor.setStyleSheet("QTextEdit { border: 2px solid green; }")
@@ -589,38 +588,43 @@ class TomoCuPyGUI(QWidget):
 
     def run_tomolog(self):
         beamline = self.beamline_box.currentText()
-        filename = self.filename_input.text().strip()
         cloud = self.cloud_box.currentText()
         url = self.url_input.text().strip()
         x = self.x_input.text().strip()
         y = self.y_input.text().strip()
         z = self.z_input.text().strip()
         scan_number = self.scan_input.text().strip()
-        scan_padded = f"{int(scan_number):04d}"
         data_folder = self.data_path.text().strip()
         vmin = self.min_input.text().strip()
         vmax = self.max_input.text().strip()
         if not data_folder:
             self.log_output.append("❌[ERROR] Data folder not set.")
             return
-        filename = os.path.join(data_folder, f"{scan_padded}.h5")
+        if not scan_number:
+            fn = self.proj_file_box.currentText()
+            filename = os.path.join(data_folder, f"{fn}")
+        else:
+            fn = os.path.join(data_folder,f"*{scan_number}.h5")
+            filename = glob.glob(fn)[0]
         if not filename:
             self.log_output.append("❌[ERROR] Filename not exist.")
             return
 
         cmd = [
-            "tomolog", "run"
+            "tomolog", "run",
             "--beamline", beamline,
-            "--filename", filename,
+            "--file-name", filename,
             "--cloud", cloud,
-            "--url", url,
+            "--presentation-url", url,
             "--idx", x,
             "--idy", y,
             "--idz", z,
             "--min", vmin,
             "--max", vmax
         ]
-
+        extra_params = self.extra_params_input.text().strip()
+        if extra_params:
+            cmd.extend(extra_params.split())
         # Run the command
         self.log_output.append(f">>> Running Tomolog: {' '.join(cmd)}")
         QApplication.processEvents()  # ✅ Force UI to update before running the process
