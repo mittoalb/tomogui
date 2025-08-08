@@ -8,7 +8,7 @@ from matplotlib.figure import Figure
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QTextEdit, QLineEdit, QLabel, QProgressBar,
-    QComboBox, QSlider, QGroupBox, QSizePolicy
+    QComboBox, QSlider, QGroupBox, QSizePolicy, QMessageBox
 )
 from PySide6.QtCore import Qt, QEvent
 from PIL import Image
@@ -61,6 +61,7 @@ class TomoCuPyGUI(QWidget):
         refresh_btn2.clicked.connect(self.refresh_h5_files)
         abort_btn = QPushButton("Abort")
         abort_btn.clicked.connect(self.abort_process)
+        abort_btn.setStyleSheet("color: red;")
         cor_layout.addWidget(refresh_btn2)
         cor_layout.addWidget(abort_btn)
         left_layout.addLayout(cor_layout)
@@ -140,6 +141,11 @@ class TomoCuPyGUI(QWidget):
         cor_full_layout.addWidget(QLabel("COR (Full):"))
         self.cor_input_full = QLineEdit()
         cor_full_layout.addWidget(self.cor_input_full)
+
+        rec_cor_btn = QPushButton("Add COR")
+        rec_cor_btn.clicked.connect(self.record_cor_to_json)
+        cor_full_layout.addWidget(rec_cor_btn)
+
         right_config_layout.addLayout(cor_full_layout)
 
         right_config_group.setLayout(right_config_layout)
@@ -161,13 +167,16 @@ class TomoCuPyGUI(QWidget):
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
         log_box_layout.addWidget(self.log_output)
-        log_json_layout.addLayout(log_box_layout, 5)
+        log_json_layout.addLayout(log_box_layout, 6)
         json_box_layout = QVBoxLayout()
         json_box_layout.addWidget(QLabel("COR Log File:"))
         self.cor_json_output = QTextEdit()
         self.cor_json_output.setReadOnly(True)
         json_box_layout.addWidget(self.cor_json_output)
-        log_json_layout.addLayout(json_box_layout, 3)
+        log_json_layout.addLayout(json_box_layout, 2)
+        self.load_cor_json_btn = QPushButton("Load COR file")
+        json_box_layout.addWidget(self.load_cor_json_btn)
+        self.load_cor_json_btn.clicked.connect(self.load_cor_to_jsonbox)
         left_layout.addLayout(log_json_layout)
 
         main_layout.addLayout(left_layout, 3.5)
@@ -175,7 +184,7 @@ class TomoCuPyGUI(QWidget):
         # Right panel
         right_layout = QVBoxLayout()
         toolbar_row = QHBoxLayout()
-        self.fig = Figure(figsize=(5, 5))
+        self.fig = Figure(figsize=(5, 6.65))
         self.canvas = FigureCanvas(self.fig)
         self.ax = self.fig.add_subplot(111)
         self.toolbar = NavigationToolbar(self.canvas, self)
@@ -493,6 +502,83 @@ class TomoCuPyGUI(QWidget):
                 ["tomocupy", "recon", "--recon-type", "full", "--config", temp_conf, "--file-name", proj_file, "--rotation-axis", str(cor_value)],
             )
 
+    def record_cor_to_json(self):
+        # Get data folder and current COR value
+        data_folder = self.data_path.text().strip()
+        cor_value = self.cor_input_full.text().strip()
+        proj_file = self.proj_file_box.currentData()
+
+        if not (data_folder and cor_value and proj_file):
+            self.log_output.append("⚠️[WARNING] Missing data folder, COR, or projection file.")
+            return
+
+        try:
+            cor_value = float(cor_value)
+        except ValueError:
+            self.log_output.append("❌[ERROR] COR value is not a valid number.")
+            return
+
+        # JSON file path
+        json_path = os.path.join(data_folder, "rot_cen.json")
+
+        # Load or create JSON data
+        if os.path.exists(json_path):
+            with open(json_path, "r") as f:
+                try:
+                    cor_data = json.load(f)
+                    fns = list(cor_data.keys())
+                except json.JSONDecodeError:
+                    cor_data = {}
+        else:
+            cor_data = {}
+        if proj_file in fns:
+            overfn_msg_box = QMessageBox(self)
+            overfn_msg_box.setIcon(QMessageBox.Warning)
+            overfn_msg_box.setWindowTitle("Overwrite Existing files in log?")
+            overfn_msg_box.setText(f"The scan:\n{os.path.basename(proj_file)}\nalready exists in rot_cen.json.\n\nDo you want to overwrite it?")
+            overfn_msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            overfn_msg_box.setDefaultButton(QMessageBox.No)
+            result = overfn_msg_box.exec()
+            if result != QMessageBox.Yes:
+                self.log_output.append("⚠️Not take COR")
+                return
+                
+        # Add/Update entry
+        cor_data[proj_file] = cor_value
+
+        # Save JSON
+        with open(json_path, "w") as f:
+            json.dump(cor_data, f, indent=2)
+
+        self.log_output.append(f"✅[INFO] COR recorded for: {proj_file}")
+
+        # Update COR log box
+        self.cor_json_output.clear()
+        for k, v in cor_data.items():
+            base = os.path.splitext(os.path.basename(k))[0]
+            last4 = base[-4:]
+            self.cor_json_output.append(f"{last4} : {v}")
+
+    def load_cor_to_jsonbox(self): #load rot_cen.json file to COR box in GUI
+        data_folder = self.data_path.text().strip()
+        json_path = os.path.join(data_folder, "rot_cen.json")
+
+        if not os.path.exists(json_path):
+            self.log_output.append("⚠️[WARNING] rot_cen.json not found in data folder.")
+            return
+
+        try:
+            with open(json_path, "r") as f:
+                cor_data = json.load(f)
+            self.cor_json_output.clear()
+            for k, v in cor_data.items():
+                base = os.path.splitext(os.path.basename(k))[0]
+                last4 = base[-4:]
+                self.cor_json_output.append(f"{last4} : {v}")
+            self.log_output.append("✅[INFO] COR log reloaded.")
+        except Exception as e:
+            self.log_output.append(f"❌[ERROR] Failed to load COR log: {e}")
+
     # ==== Viewing ====
     def view_try_reconstruction(self):
         data_folder = self.data_path.text().strip()
@@ -583,7 +669,7 @@ class TomoCuPyGUI(QWidget):
             (xlim, ylim) != ((0, width), (height, 0))):
             self.ax.set_xlim(xlim)
             self.ax.set_ylim(ylim)
-
+        self.fig.tight_layout()
         self.canvas.draw()
 
     def run_tomolog(self):
