@@ -273,6 +273,10 @@ class TomoCuPyGUI(QWidget):
 
         # Row 4: Extra parameters
         row4 = QHBoxLayout()
+        row4.addWidget(QLabel("Note"))
+        self.note_input = QLineEdit()
+        row4.addWidget(self.note_input)
+
         row4.addWidget(QLabel("Extra Params"))
         self.extra_params_input = QLineEdit()
         self.extra_params_input.setPlaceholderText("--public True")  # Example shown when empty
@@ -384,7 +388,7 @@ class TomoCuPyGUI(QWidget):
             self.log_output.append("✅[INFO] Process aborted.")
             self.process = None
 
-    def run_command_live(self, cmd, mode=""):
+    def run_command_live(self, cmd):
         cli_str = " ".join(map(str, cmd))
         proj_file = self.proj_file_box.currentData()
         if proj_file:
@@ -392,8 +396,7 @@ class TomoCuPyGUI(QWidget):
         self.log_output.append(f">>> Running command: {cli_str}")
         QApplication.processEvents()  # ✅ Force UI to update before running the process
         try:
-            self.process = subprocess.run(cmd)
-            self.process.wait()
+            self.process = subprocess.run(cmd,check=True)
             if self.process.returncode == 0:
                 self.log_output.append(f"✅[INFO] try center scan {scan_id} successfully")
             else:
@@ -483,9 +486,9 @@ class TomoCuPyGUI(QWidget):
                     continue
                 proj_file = match_files[0]
                 self.run_command_live(
-                    ["tomocupy", "recon", "--recon-type", "try", "--config", temp_conf, "--file-name", proj_file],
-                    mode=f"Batch Try {scan_str}"
+                    ["tomocupy", "recon", "--recon-type", "try", "--config", temp_conf, "--file-name", proj_file]
                 )
+            self.log_output.append("✅Done all try")
 
     def batch_full_reconstruction(self):
         log_file = os.path.join(self.data_path.text(), "cor_log.json")
@@ -672,6 +675,10 @@ class TomoCuPyGUI(QWidget):
         self.fig.tight_layout()
         self.canvas.draw()
 
+    def get_note_value(self): # for tomolog note
+        note = self.note_input.text().strip()
+        return f'"{note}"' if note else None
+    
     def run_tomolog(self):
         beamline = self.beamline_box.currentText()
         cloud = self.cloud_box.currentText()
@@ -686,41 +693,67 @@ class TomoCuPyGUI(QWidget):
         if not data_folder:
             self.log_output.append("❌[ERROR] Data folder not set.")
             return
+        flist = []
         if not scan_number:
             fn = self.proj_file_box.currentText()
             filename = os.path.join(data_folder, f"{fn}")
+            flist.append(filename)
+            if not filename:
+                self.log_output.append("❌[ERROR] Filename not exist.")
+                return
         else:
-            fn = os.path.join(data_folder,f"*{scan_number}.h5")
-            filename = glob.glob(fn)[0]
-        if not filename:
-            self.log_output.append("❌[ERROR] Filename not exist.")
-            return
-
-        cmd = [
-            "tomolog", "run",
-            "--beamline", beamline,
-            "--file-name", filename,
-            "--cloud", cloud,
-            "--presentation-url", url,
-            "--idx", x,
-            "--idy", y,
-            "--idz", z,
-            "--min", vmin,
-            "--max", vmax
-        ]
-        extra_params = self.extra_params_input.text().strip()
-        if extra_params:
-            cmd.extend(extra_params.split())
-        # Run the command
-        self.log_output.append(f">>> Running Tomolog: {' '.join(cmd)}")
-        QApplication.processEvents()  # ✅ Force UI to update before running the process
-        try:
-            subprocess.run(cmd, check=True)
-            self.log_output.append("✅ Tomolog finished successfully")
-        except subprocess.CalledProcessError as e:
-            self.log_output.append(f"❌[ERROR] Tomolog failed with code {e.returncode}")
-        except Exception as e:
-            self.log_output.append(f"❌[ERROR] Failed to run Tomolog: {e}")
+            numbers = set()
+            sns = scan_number.split(",")
+            for sn in sns:
+                if "-" in sn:
+                    try:
+                        start, end = map(int, sn.split("-"))
+                        numbers.update(range(start, end+1))
+                    except ValueError:
+                        self.log_output.append("❌[ERROR] Invalid range: {sn}")
+                else: #single number input
+                    try:
+                        numbers.add(int(sn))
+                    except ValueError:
+                        self.log_output.append("❌[ERROR] Invalid scan number: {sn}")
+            for n in numbers:
+                fn = os.path.join(data_folder,f"*{n}.h5")
+                try:
+                    filename = glob.glob(fn)[0]
+                except IndexError:
+                    self.log_output.append(f"Scan {n} not exist, stop")
+                    break
+                flist.append(filename)
+        note_value = self.get_note_value()
+        for input_fn in flist:
+            cmd = [
+                "tomolog", "run",
+                "--beamline", beamline,
+                "--file-name", input_fn,
+                "--cloud", cloud,
+                "--presentation-url", url,
+                "--idx", x,
+                "--idy", y,
+                "--idz", z,
+                "--note", note_value
+            ]
+            if vmin != "":
+                cmd.extend(["--min", vmin])
+            if vmax != "":
+                cmd.extend(["--max", vmax])
+            extra_params = self.extra_params_input.text().strip()
+            if extra_params:
+                cmd.extend(extra_params.split())
+            # Run the command
+            self.log_output.append(f">>> Running Tomolog: {' '.join(cmd)}")
+            QApplication.processEvents()  # Force UI to update before running the process
+            try:
+                subprocess.run(cmd, check=True)
+                self.log_output.append(f"✅ Tomolog finished successfully with scan {input_fn}")
+            except subprocess.CalledProcessError as e:
+                self.log_output.append(f"❌[ERROR] Tomolog failed with code {e.returncode}")
+            except Exception as e:
+                self.log_output.append(f"❌[ERROR] Failed to run Tomolog: {e}")
 
 
 
