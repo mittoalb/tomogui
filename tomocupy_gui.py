@@ -8,9 +8,9 @@ from matplotlib.figure import Figure
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QTextEdit, QLineEdit, QLabel, QProgressBar,
-    QComboBox, QSlider, QGroupBox, QSizePolicy, QMessageBox
+    QComboBox, QSlider, QGroupBox, QSizePolicy, QMessageBox, QDialog, QPlainTextEdit
 )
-from PySide6.QtCore import Qt, QEvent
+from PySide6.QtCore import Qt, QEvent, QProcess
 from PIL import Image
 
 
@@ -27,7 +27,7 @@ class TomoCuPyGUI(QWidget):
         self.vmax = None
         self.preview_files = []
         self.full_files = []
-        self.process = None
+        self.process = []
 
         main_layout = QHBoxLayout()
 
@@ -50,6 +50,9 @@ class TomoCuPyGUI(QWidget):
         self.proj_file_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         proj_layout.addWidget(QLabel("Projection File:"))
         proj_layout.addWidget(self.proj_file_box)
+        refresh_btn2 = QPushButton("Refresh")
+        refresh_btn2.clicked.connect(self.refresh_h5_files)
+        proj_layout.addWidget(refresh_btn2)
         left_layout.addLayout(proj_layout)
 
         # Rotation axis + Refresh + Abort
@@ -57,24 +60,24 @@ class TomoCuPyGUI(QWidget):
         self.cor_input = QLineEdit()
         cor_layout.addWidget(QLabel("Center of Rotation:"))
         cor_layout.addWidget(self.cor_input)
-        refresh_btn2 = QPushButton("Refresh")
-        refresh_btn2.clicked.connect(self.refresh_h5_files)
-        abort_btn = QPushButton("Abort")
-        abort_btn.clicked.connect(self.abort_process)
-        abort_btn.setStyleSheet("color: red;")
-        cor_layout.addWidget(refresh_btn2)
-        cor_layout.addWidget(abort_btn)
-        left_layout.addLayout(cor_layout)
 
-        # Load/Save Config buttons
-        config_btn_layout = QHBoxLayout()
         load_config_btn = QPushButton("Load Config")
         save_config_btn = QPushButton("Save Config")
         load_config_btn.clicked.connect(self.load_config)
         save_config_btn.clicked.connect(self.save_config)
-        config_btn_layout.addWidget(load_config_btn)
-        config_btn_layout.addWidget(save_config_btn)
-        left_layout.addLayout(config_btn_layout)
+        cor_layout.addWidget(load_config_btn)
+        cor_layout.addWidget(save_config_btn)
+
+        help_tomo_btn = QPushButton("help")
+        help_tomo_btn.clicked.connect(self.help_tomo)
+        cor_layout.addWidget(help_tomo_btn)
+
+        abort_btn = QPushButton("Abort")
+        abort_btn.clicked.connect(self.abort_process)
+        abort_btn.setStyleSheet("color: red;")
+        cor_layout.addWidget(abort_btn)
+        left_layout.addLayout(cor_layout)
+
 
         # Try and Full config boxes
         config_frame_layout = QHBoxLayout()
@@ -84,7 +87,7 @@ class TomoCuPyGUI(QWidget):
         left_config_layout = QVBoxLayout()
         self.config_editor_try = QTextEdit()
         self.config_editor_try.setFixedHeight(300)
-        self.config_editor_try.setStyleSheet("QTextEdit { border: 1px solid gray; }")
+        self.config_editor_try.setStyleSheet("QTextEdit { border: 1px solid gray; font-size: 12.5pt; }")
         self.config_editor_try.focusInEvent = lambda event: self.highlight_editor(self.config_editor_try, event)
         self.config_editor_try.focusOutEvent = lambda event: self.unhighlight_editor(self.config_editor_try, event)
         left_config_layout.addWidget(self.config_editor_try)
@@ -118,10 +121,12 @@ class TomoCuPyGUI(QWidget):
         right_config_layout = QVBoxLayout()
         self.config_editor_full = QTextEdit()
         self.config_editor_full.setFixedHeight(300)
-        self.config_editor_full.setStyleSheet("QTextEdit { border: 1px solid gray; }")
+        self.config_editor_full.setStyleSheet("QTextEdit { border: 1px solid gray; font-size: 12.5pt; }")
         self.config_editor_full.focusInEvent = lambda event: self.highlight_editor(self.config_editor_full, event)
         self.config_editor_full.focusOutEvent = lambda event: self.unhighlight_editor(self.config_editor_full, event)
         right_config_layout.addWidget(self.config_editor_full)
+
+        self.active_editor = self.config_editor_try #default target
 
         full_btn_layout = QHBoxLayout()
         full_btn = QPushButton("Full")
@@ -135,7 +140,7 @@ class TomoCuPyGUI(QWidget):
         full_btn_layout.addWidget(self.view_btn)
         full_btn_layout.addWidget(batch_full_btn)
         right_config_layout.addLayout(full_btn_layout)
-
+        
         # COR (Full) inline
         cor_full_layout = QHBoxLayout()
         cor_full_layout.addWidget(QLabel("COR (Full):"))
@@ -172,6 +177,7 @@ class TomoCuPyGUI(QWidget):
         json_box_layout.addWidget(QLabel("COR Log File:"))
         self.cor_json_output = QTextEdit()
         self.cor_json_output.setReadOnly(True)
+        self.cor_json_output.setStyleSheet("QTextEdit { font-size: 12pt; }")
         json_box_layout.addWidget(self.cor_json_output)
         log_json_layout.addLayout(json_box_layout, 2)
         self.load_cor_json_btn = QPushButton("Load COR file")
@@ -284,9 +290,16 @@ class TomoCuPyGUI(QWidget):
         tomolog_layout.addLayout(row4)
 
         # Row 5: Apply button
+        row5 = QHBoxLayout()
         apply_btn = QPushButton("Apply")
         apply_btn.clicked.connect(self.run_tomolog)
-        tomolog_layout.addWidget(apply_btn)
+        help_tomolog_btn = QPushButton("help-log")
+        help_tomolog_btn.clicked.connect(self.help_tomolog)
+        row5.addWidget(apply_btn)
+        row5.addWidget(help_tomolog_btn)
+        row5.setStretch(0,3)
+        row5.setStretch(1,1)
+        tomolog_layout.addLayout(row5)
 
 
         tomolog_group.setLayout(tomolog_layout)
@@ -294,6 +307,49 @@ class TomoCuPyGUI(QWidget):
 
         main_layout.addLayout(right_layout, 4)
         self.setLayout(main_layout)
+
+    def help_tomo(self):
+        """Run the CLI `tomocupy recon -h` and show output in the GUI log."""
+        name = "tomocupy-help"
+        self.log_output.append(f"📖[{name}] tomocupy recon -h")
+
+        p = QProcess(self)
+        # Keep stdout/stderr separate so we see errors too
+        p.setProcessChannelMode(QProcess.SeparateChannels)
+
+        # Stream output to the log pane
+        p.readyReadStandardOutput.connect(
+            lambda: self.log_output.append(
+                bytes(p.readAllStandardOutput()).decode(errors="ignore")
+            )
+        )
+        p.readyReadStandardError.connect(
+            lambda: self.log_output.append(
+                bytes(p.readAllStandardError()).decode(errors="ignore")
+            )
+        )
+
+        # Start/finish/error handling
+        def _done(code, _status):
+            try:
+                self.process[:] = [(pp, nn) for (pp, nn) in self.process if pp is not p]
+            except Exception:
+                pass
+            self.log_output.append(f"✅[{name}] done." if code == 0
+                                else f"❌[{name}] failed with code {code}.")
+
+        p.finished.connect(_done)
+        p.errorOccurred.connect(
+            lambda _err: self.log_output.append(f"❌[{name}] {p.errorString()}")
+        )
+
+        # Track so your existing Abort button can terminate it
+        if not isinstance(self.process, list):
+            self.process = []
+        self.process.append((p, name))
+
+        # --- CLI only (no python -m) ---
+        p.start("tomocupy", ["recon", "-h"])
 
 
     def update_cmap(self):
@@ -323,11 +379,12 @@ class TomoCuPyGUI(QWidget):
 
     # Highlight border on focus
     def highlight_editor(self, editor, event):
-        editor.setStyleSheet("QTextEdit { border: 2px solid green; }")
+        editor.setStyleSheet("QTextEdit { border: 2px solid green; font-size: 12.5pt; }")
+        self.active_editor = editor
         QTextEdit.focusInEvent(editor, event)
 
     def unhighlight_editor(self, editor, event):
-        editor.setStyleSheet("QTextEdit { border: 1px solid gray; }")
+        editor.setStyleSheet("QTextEdit { border: 1px solid gray; font-size: 12.5pt; }")
         QTextEdit.focusOutEvent(editor, event)
 
     # Event filter for scroll
@@ -342,8 +399,11 @@ class TomoCuPyGUI(QWidget):
 
     # Utility methods
     def browse_data_folder(self):
-        dialog = QFileDialog(self)
+        start_dir = self.data_path.text().strip() or os.path.expanduser("~")
+        dialog = QFileDialog(self, "Select data folder")
         dialog.setFileMode(QFileDialog.Directory)
+        dialog.setOption(QFileDialog.ShowDirsOnly, True)
+        dialog.setDirectory(start_dir)    # <-- seed with last folder
         if dialog.exec():
             self.data_path.setText(dialog.selectedFiles()[0])
             self.refresh_h5_files()
@@ -360,63 +420,121 @@ class TomoCuPyGUI(QWidget):
         dialog.setFileMode(QFileDialog.ExistingFile)
         if dialog.exec():
             fn = dialog.selectedFiles()[0]
-            with open(fn) as f:
-                if self.config_editor_full.hasFocus():
-                    self.config_editor_full.setPlainText(f.read())
-                else:
-                    self.config_editor_try.setPlainText(f.read())
+            with open(fn, "r") as f:
+                target = self.active_editor or self.config_editor_try
+                target.setPlainText(f.read())
 
     def save_config(self):
         dialog = QFileDialog(self)
         dialog.setAcceptMode(QFileDialog.AcceptSave)
         if dialog.exec():
             fn = dialog.selectedFiles()[0]
-            if self.config_editor_full.hasFocus():
-                text = self.config_editor_full.toPlainText()
-            else:
-                text = self.config_editor_try.toPlainText()
+            text = (self.active_editor or self.config_editor_try).toPlainText()
             with open(fn, "w") as f:
                 f.write(text)
 
     def abort_process(self):
-        if self.process and self.process.poll() is None:
-            self.process.terminate()
-            try:
-                self.process.kill()
-            except:
-                pass
-            self.log_output.append("✅[INFO] Process aborted.")
-            self.process = None
+        if not self.process:
+            self.log_output.append("ℹ️[INFO] No running process.")
+            return
 
-    def run_command_live(self, cmd):
-        cli_str = " ".join(map(str, cmd))
-        proj_file = self.proj_file_box.currentData()
+        # Graceful terminate first
+        for p, name in list(self.process):
+            if p.state() != QProcess.NotRunning:
+                p.terminate()
+
+        # Force kill stragglers
+        for p, name in list(self.process):
+            if p.state() != QProcess.NotRunning:
+                if not p.waitForFinished(2000):
+                    p.kill()
+                    p.waitForFinished(2000)
+            self.log_output.append(f"⛔ [{name}] aborted.")
+
+        self.process.clear()
+
+    def _delete_when_done(self, path):
+        """Remove a file when the *most recently started* process finishes."""
+        if not path:
+            return
+        if not self.process:
+            return
+        p = self.process[-1][0]  # the QProcess you just started
+        def _rm(*_):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                    self.log_output.append(f"🧹 Removed {path}")
+            except Exception as e:
+                self.log_output.append(f"⚠️ Could not remove {path}: {e}")
+        p.finished.connect(_rm)
+
+
+    def run_command_live(self, cmd, proj_file=None, job_label=None):
+        """
+        Start an external command without blocking the GUI.
+        proj_file: full path to the .h5 (for log naming, optional)
+        job_label: e.g., 'recon-try', 'recon-full', 'tomolog' (optional)
+        """
+        # Build a readable job name for logs
+        scan_id = None
         if proj_file:
-            scan_id = os.path.splitext(os.path.basename(proj_file))[0][-4:]
-        self.log_output.append(f">>> Running command: {cli_str}")
-        QApplication.processEvents()  # ✅ Force UI to update before running the process
-        try:
-            self.process = subprocess.run(cmd,check=True)
-            if self.process.returncode == 0:
-                self.log_output.append(f"✅[INFO] try center scan {scan_id} successfully")
+            try:
+                base = os.path.splitext(os.path.basename(proj_file))[0]
+                scan_id = base[-4:]  # your convention
+            except Exception:
+                scan_id = None
+
+        if job_label is None:
+            job_label = "job"
+        name = f"{job_label}-{scan_id}" if scan_id else job_label
+
+        cli_str = " ".join(map(str, cmd))
+        self.log_output.append(f"🚀 [{name}] start: {cli_str}")
+        QApplication.processEvents()
+
+        p = QProcess(self)
+        p.setProcessChannelMode(QProcess.ForwardedChannels)
+
+        # Cleanup on finish
+        def on_finished(code, status):
+            try:
+                self.process[:] = [(pp, nn) for (pp, nn) in self.process if pp is not p]
+            except Exception:
+                pass
+            if code == 0:
+                self.log_output.append(f"✅ [{name}] finished.")
             else:
-                self.log_output.append(f"❌[ERROR] try center scan {scan_id} failed (code {self.process.returncode})")
-        except Exception as e:
-            self.log_output.append(f"❌[ERROR] Failed to run try scan {scan_id}: {e}")
-        finally:
-            self.process = None
+                self.log_output.append(f"❌ [{name}] failed with code {code}.")
+
+        p.finished.connect(on_finished)
+
+        # Track it so Abort can find it
+        self.process.append((p, name))
+        p.start(str(cmd[0]), [str(a) for a in cmd[1:]])
+
 
     def try_reconstruction(self):
         proj_file = self.proj_file_box.currentData()
         if not proj_file:
+            self.log_output.append(f"❌ No file")
             return
+        cor_val = self.cor_input.text().strip() #get user input rotation axis guess
+        try:
+            cor = float(cor_val)
+        except ValueError:
+            self.log_output.append(f"❌ wrong rotation axis input")
         config_text = self.config_editor_try.toPlainText()
-        temp_conf = os.path.join(self.data_path.text(), "temp_try.conf")
-        with open(temp_conf, "w") as f:
+        temp_try = os.path.join(self.data_path.text(), "temp_try.conf")
+        with open(temp_try, "w") as f:
             f.write(config_text)
-        self.run_command_live(
-            ["tomocupy", "recon", "--recon-type", "try", "--config", temp_conf, "--file-name", proj_file]
-        )
+        cmd = ["tomocupy", "recon", 
+               "--reconstruction-type", "try", 
+               "--config", temp_try, 
+               "--file-name", proj_file,
+               "--rotation-axis", str(cor)]
+        self.run_command_live(cmd, proj_file=proj_file, job_label="Try recon")
+        self._delete_when_done(temp_try)
 
     def full_reconstruction(self):
         proj_file = self.proj_file_box.currentData()
@@ -426,39 +544,17 @@ class TomoCuPyGUI(QWidget):
             self.log_output.append("❌[ERROR] Invalid Full COR value.")
             return
         config_text = self.config_editor_full.toPlainText()
-        temp_conf = os.path.join(self.data_path.text(), "temp_full.conf")
-        with open(temp_conf, "w") as f:
+        temp_full = os.path.join(self.data_path.text(), "temp_full.conf")
+        with open(temp_full, "w") as f:
             f.write(config_text)
-        self.run_command_live(
-            ["tomocupy", "recon","--recon-type", "full","--config", temp_conf, "--file-name", proj_file, "--rotation-axis", str(cor_value)]
-        )
+        cmd = ["tomocupy", "recon",
+               "--reconstruction-type", "full",
+               "--config", temp_full, 
+               "--file-name", proj_file, 
+               "--rotation-axis", str(cor_value)]
+        self.run_command_live(cmd, proj_file=proj_file, job_label="Full recon")
+        self._delete_when_done(temp_full)
         self.view_btn.setEnabled(True)
-
-    def batch_try_reconstruction(self):
-        try:
-            start_num = int(self.start_scan_input.text())
-            end_num = int(self.end_scan_input.text())
-        except ValueError:
-            self.log_output.append("❌[ERROR] Invalid start or end scan number.")
-            return
-        folder = self.data_path.text()
-        if not os.path.isdir(folder):
-            self.log_output.append("❌[ERROR] Invalid data folder.")
-            return
-        config_text = self.config_editor_try.toPlainText()
-        temp_conf = os.path.join(folder, "temp_batch_try.conf")
-        with open(temp_conf, "w") as f:
-            f.write(config_text)
-        for scan_num in range(start_num, end_num + 1):
-            scan_str = f"{scan_num:04d}"
-            match_files = glob.glob(os.path.join(folder, f"*{scan_str}.h5"))
-            if not match_files:
-                self.log_output.append(f"⚠️[WARN] No file found for scan {scan_str}, skipping.")
-                continue
-            proj_file = match_files[0]
-            self.run_command_live(
-                ["tomocupy", "recon", "--recon-type", "try", "--config", temp_conf, "--file-name", proj_file]
-            )
 
     def batch_try_reconstruction(self):
             try:
@@ -474,8 +570,8 @@ class TomoCuPyGUI(QWidget):
                 return
 
             config_text = self.config_editor_try.toPlainText()
-            temp_conf = os.path.join(folder, "temp_batch_try.conf")
-            with open(temp_conf, "w") as f:
+            temp_try = os.path.join(folder, "temp_batch_try.conf")
+            with open(temp_try, "w") as f:
                 f.write(config_text)
 
             for scan_num in range(start_num, end_num + 1):
@@ -485,9 +581,14 @@ class TomoCuPyGUI(QWidget):
                     self.log_output.append(f"⚠️[WARN] No file found for scan {scan_str}, skipping.")
                     continue
                 proj_file = match_files[0]
-                self.run_command_live(
-                    ["tomocupy", "recon", "--recon-type", "try", "--config", temp_conf, "--file-name", proj_file]
-                )
+
+                cmd = ["tomocupy", "recon", 
+                       "--reconstruction-type", "try", 
+                       "--config", temp_try, 
+                       "--file-name", proj_file]
+                self.run_command_live(cmd, proj_file=proj_file, job_label='batch try')
+                #do not need to delete conf file because we use the same one
+                self.log_output.append(f"✅Finish try recon {proj_file}")
             self.log_output.append("✅Done all try")
 
     def batch_full_reconstruction(self):
@@ -501,9 +602,15 @@ class TomoCuPyGUI(QWidget):
             f.write(self.config_editor_full.toPlainText())
         for entry in data:
             proj_file, cor_value = entry["filename"], entry["center"]
-            self.run_command_live(
-                ["tomocupy", "recon", "--recon-type", "full", "--config", temp_conf, "--file-name", proj_file, "--rotation-axis", str(cor_value)],
-            )
+            cmd = ["tomocupy", "recon", 
+                   "--reconstruction-type", "full", 
+                   "--config", temp_conf, 
+                   "--file-name", proj_file, 
+                   "--rotation-axis", str(cor_value)]
+            self.run_command_live(cmd, proj_file=proj_file, job_label="batch full")
+            #do not need to delete conf file because we use the same one
+            self.log_output.append(f"✅Finish full recon {proj_file}")
+        self.log_output.append("✅Done all full")
 
     def record_cor_to_json(self):
         # Get data folder and current COR value
@@ -590,6 +697,7 @@ class TomoCuPyGUI(QWidget):
         try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
         self.preview_files = sorted(glob.glob(os.path.join(try_dir, "*.tiff")))
         if not self.preview_files:
+            self.log_output.append(f"❌No try folder")
             return
         self.set_image_scale(self.preview_files[0])
         try:
@@ -623,7 +731,7 @@ class TomoCuPyGUI(QWidget):
     def set_image_scale(self, img_path):
         img = np.array(Image.open(img_path))
         if self.vmin is None or self.vmax is None:
-            self.vmin, self.vmax = float(img.min()), float(img.max())
+            self.vmin, self.vmax = round(img.min(),6), round(img.max(),6)
             self.min_input.setText(str(self.vmin))
             self.max_input.setText(str(self.vmax))
 
@@ -638,9 +746,18 @@ class TomoCuPyGUI(QWidget):
         if 0 <= idx < len(self.full_files):
             self.show_image(self.full_files[idx])
 
-    
+    def _safe_open_image(self, path, retries=3):
+        for _ in range(retries):
+            try:
+                with Image.open(path) as im:
+                    return np.array(im)
+            except Exception:
+                QApplication.processEvents()
+        with Image.open(path) as im:
+            return np.array(im)
+
     def show_image(self, img_path):
-        img = np.array(Image.open(img_path))
+        img = self._safe_open_image(img_path)
         if img.ndim == 3:
             img = img[..., 0]
         height, width = img.shape
@@ -678,7 +795,51 @@ class TomoCuPyGUI(QWidget):
     def get_note_value(self): # for tomolog note
         note = self.note_input.text().strip()
         return f'"{note}"' if note else None
-    
+
+    def help_tomolog(self):
+            """Run the CLI `tomolog run -h` and show output in the GUI log."""
+            name = "tomolog-help"
+            self.log_output.append(f"📖[{name}] tomocupy run -h")
+
+            p = QProcess(self)
+            # Keep stdout/stderr separate so we see errors too
+            p.setProcessChannelMode(QProcess.SeparateChannels)
+
+            # Stream output to the log pane
+            p.readyReadStandardOutput.connect(
+                lambda: self.log_output.append(
+                    bytes(p.readAllStandardOutput()).decode(errors="ignore")
+                )
+            )
+            p.readyReadStandardError.connect(
+                lambda: self.log_output.append(
+                    bytes(p.readAllStandardError()).decode(errors="ignore")
+                )
+            )
+
+            # Start/finish/error handling
+            def _done(code, _status):
+                try:
+                    self.process[:] = [(pp, nn) for (pp, nn) in self.process if pp is not p]
+                except Exception:
+                    pass
+                self.log_output.append(f"✅[{name}] done." if code == 0
+                                    else f"❌[{name}] failed with code {code}.")
+
+            p.finished.connect(_done)
+            p.errorOccurred.connect(
+                lambda _err: self.log_output.append(f"❌[{name}] {p.errorString()}")
+            )
+
+            # Track so your existing Abort button can terminate it
+            if not isinstance(self.process, list):
+                self.process = []
+            self.process.append((p, name))
+
+            # --- CLI only (no python -m) ---
+            p.start("tomolog", ["run", "-h"])
+
+
     def run_tomolog(self):
         beamline = self.beamline_box.currentText()
         cloud = self.cloud_box.currentText()
@@ -748,14 +909,12 @@ class TomoCuPyGUI(QWidget):
             self.log_output.append(f">>> Running Tomolog: {' '.join(cmd)}")
             QApplication.processEvents()  # Force UI to update before running the process
             try:
-                subprocess.run(cmd, check=True)
+                self.run_command_live(cmd, proj_file=input_fn, job_label="tomolog")
                 self.log_output.append(f"✅ Tomolog finished successfully with scan {input_fn}")
             except subprocess.CalledProcessError as e:
                 self.log_output.append(f"❌[ERROR] Tomolog failed with code {e.returncode}")
             except Exception as e:
                 self.log_output.append(f"❌[ERROR] Failed to run Tomolog: {e}")
-
-
 
 
 if __name__ == "__main__":
