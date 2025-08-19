@@ -1,6 +1,7 @@
 import sys, os, glob, json, subprocess
 import numpy as np
 import matplotlib
+from pathlib import Path
 matplotlib.use("QtAgg")
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
@@ -8,10 +9,16 @@ from matplotlib.figure import Figure
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QTextEdit, QLineEdit, QLabel, QProgressBar,
-    QComboBox, QSlider, QGroupBox, QSizePolicy, QMessageBox, QDialog, QPlainTextEdit
+    QComboBox, QSlider, QGroupBox, QSizePolicy
 )
-from PySide6.QtCore import Qt, QEvent, QProcess
+from PySide6.QtCore import Qt, QEvent
 from PIL import Image
+import matplotlib as mpl
+
+GUI_path = Path(__file__).resolve().parent
+parent_path = GUI_path.parent
+mpl.rcdefaults()
+mpl.style.use(f"{parent_path}/tomoGUI_mpl_format.mplstyle")
 
 
 class TomoCuPyGUI(QWidget):
