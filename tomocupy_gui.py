@@ -214,7 +214,7 @@ class TomoCuPyGUI(QWidget):
         toolbar_row.addWidget(self.cmap_box)
 
         #auto scale image button
-        auto_scale_btn = QPushButton("Auto")
+        auto_scale_btn = QPushButton("Auto B&C")
         auto_scale_btn.clicked.connect(self.auto_img_contrast)
         toolbar_row.addWidget(auto_scale_btn)
 
