@@ -4,7 +4,7 @@ import matplotlib
 from pathlib import Path
 matplotlib.use("QtAgg")
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -212,8 +212,7 @@ class TomoCuPyGUI(QWidget):
         self.roi_extent = None  # Placeholder for ROI extent
         self._drawing_roi = False  # Flag to track if ROI is being drawn
         self.canvas.mpl_connect("button_press_event", self._on_canvas_click)
-        self.toolbar = NavigationToolbar(self.canvas, self)
-        self.canvas.mpl_connect('button_release_event', self._auto_disable_tools_once)
+        self.toolbar = OneShotToolbar(self.canvas, self)
         toolbar_row.addWidget(self.toolbar)
         
 
@@ -433,6 +432,7 @@ class TomoCuPyGUI(QWidget):
             step = 1 if event.angleDelta().y() > 0 else -1
             new_val = self.slice_slider.value() + step
             new_val = max(0, min(self.slice_slider.maximum(), new_val))
+            self._keep_zoom = True
             self.slice_slider.setValue(new_val)
             return True
         return super().eventFilter(obj, event)
@@ -903,7 +903,7 @@ class TomoCuPyGUI(QWidget):
         if vis.size < 64:
             vis = a
 
-        lo, hi = np.nanpercentile(vis, [5,95]) #hard coded to 5%
+        lo, hi = np.nanpercentile(vis, [3,97]) #hard coded to 3%
         if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
             lo, hi = float(np.nanmin(vis)), float(np.nanmax(vis))
             if lo >= hi:
@@ -1004,38 +1004,6 @@ class TomoCuPyGUI(QWidget):
         self._last_xlim = self.ax.get_xlim()
         self._last_ylim = self.ax.get_ylim()
         self._last_image_shape = (h, w)
-
-    def _auto_disable_tools_once(self, event):
-        """Turn off Zoom (and optionally Pan) after a single drag-release."""
-        # Only care about releases inside the axes and from left mouse button
-        if event.inaxes is None:
-            return
-        if event.button not in (MouseButton.LEFT, 1):
-            return
-
-        active = getattr(self.toolbar, "_active", None)  # 'ZOOM', 'PAN', or None
-        # One-shot Zoom
-        if active == 'ZOOM':
-            # toggle off
-            try:
-                self.toolbar.zoom()   # NavigationToolbar2QT toggle method
-            except Exception:
-                pass
-            # optional: clear mode text if your UI shows it
-            try:
-                self.toolbar.set_message('')
-            except Exception:
-                pass
-        #One-shot Pan
-        if active == 'PAN':
-             try:
-                 self.toolbar.pan()
-             except Exception:
-                 pass
-             try:
-                 self.toolbar.set_message('')
-             except Exception:
-                 pass
 
     def get_note_value(self): # for tomolog note
         note = self.note_input.text().strip()
@@ -1160,6 +1128,51 @@ class TomoCuPyGUI(QWidget):
                 self.log_output.append(f"❌[ERROR] Tomolog failed with code {e.returncode}")
             except Exception as e:
                 self.log_output.append(f"❌[ERROR] Failed to run Tomolog: {e}")
+
+
+class OneShotToolbar(NavigationToolbar2QT):
+    """Toolbar that auto-disables Zoom after a single use (optionally Pan too)."""
+    def release_zoom(self, event):
+        # Let the base class finish the zoom operation first
+        super().release_zoom(event)
+        # Immediately toggle Zoom off so the next click is normal interaction
+        if getattr(self, "_active", None) == "ZOOM":
+            try:
+                # Uncheck the zoom button in the UI (helps on some Qt versions)
+                act = getattr(self, "_actions", {}).get("zoom")
+                if act:
+                    act.setChecked(False)
+            except Exception:
+                pass
+            # Toggle the tool off
+            try:
+                self.zoom()
+            except Exception:
+                pass
+            # Clear any status message
+            try:
+                self.set_message("")
+            except Exception:
+                pass
+
+    #Pan to be one-shot:
+    def release_pan(self, event):
+        super().release_pan(event)
+        if getattr(self, "_active", None) == "PAN":
+            try:
+                act = getattr(self, "_actions", {}).get("pan")
+                if act:
+                    act.setChecked(False)
+            except Exception:
+                pass
+            try:
+                self.pan()
+            except Exception:
+                pass
+            try:
+                self.set_message("")
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
