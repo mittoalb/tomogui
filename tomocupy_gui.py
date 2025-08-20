@@ -776,7 +776,6 @@ class TomoCuPyGUI(QWidget):
         self.min_input.setText(str(self.vmin))  
         self.max_input.setText(str(self.vmax))
         self.refresh_current_image()
-        self._current_img = np.clip(self._current_img, lo, hi) #update current image clipping
 
     def reset_img_contrast(self):
         """Reset contrast to original min/max values."""
