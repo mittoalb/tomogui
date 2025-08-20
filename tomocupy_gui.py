@@ -34,6 +34,8 @@ class TomoCuPyGUI(QWidget):
         self.preview_files = []
         self.full_files = []
         self.process = []
+        self._current_img = None # currently displayed image
+        self._current_img_path = None
 
         main_layout = QHBoxLayout()
 
@@ -210,6 +212,11 @@ class TomoCuPyGUI(QWidget):
         self.cmap_box.setCurrentText(self.default_cmap)
         self.cmap_box.currentIndexChanged.connect(self.update_cmap)
         toolbar_row.addWidget(self.cmap_box)
+
+        #auto scale image button
+        auto_scale_btn = QPushButton("Auto")
+        auto_scale_btn.clicked.connect(self.auto_img_contrast)
+        toolbar_row.addWidget(auto_scale_btn)
 
         # Min/Max inputs
         toolbar_row.addWidget(QLabel("Min:"))
@@ -737,10 +744,32 @@ class TomoCuPyGUI(QWidget):
 
     def set_image_scale(self, img_path):
         img = np.array(Image.open(img_path))
-        self.vmin, self.vmax = round(0.95*img.min(),5), round(0.95*img.max(),5)  #use 95% of min.max as auto
+        self.vmin, self.vmax = round(img.min(),5), round(img.max(),5)  #use 95% of min.max as auto
         self.min_input.setText(str(self.vmin))
         self.max_input.setText(str(self.vmax))
 
+    #auto contrast function
+    def auto_img_contrast(self, saturation=0.35):
+        """clip saturated pixels with 0.35%, similar to Fiji B&C auto function """
+        if self._current_img is not None:
+            a = self._current_img.ravel()
+        else:
+            self.log_output.append("⚠️ No image loaded to auto contrast.")
+            return
+        if a.size == 0:
+            self.log_output.append("⚠️ No pixels to auto contrast.")
+            return
+        per_tail = saturation / 2 #percent per side
+        try:
+            lo, hi = np.percentile(a, [per_tail, 100 - per_tail])
+            if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
+                lo, hi = float(np.nanmin(a)), float(np.nanmax(a))
+        except Exception:
+            lo, hi= float(np.nanmin(a)), float(np.nanmax(a))
+        self.vmin, self.vmax = round(lo, 5), round(hi, 5)
+        self.min_input.setText(str(self.vmin))  
+        self.max_input.setText(str(self.vmax))
+        self.refresh_current_image()
 
     def update_try_slice(self):
         idx = self.slice_slider.value()
@@ -767,7 +796,8 @@ class TomoCuPyGUI(QWidget):
         if img.ndim == 3:
             img = img[..., 0]
         height, width = img.shape
-
+        self._current_img = img
+        self._current_img_path = img_path
         # Save current zoom state
         try:
             xlim = self.ax.get_xlim()
@@ -785,6 +815,7 @@ class TomoCuPyGUI(QWidget):
             origin="upper"
         )
         self.ax.set_title(os.path.basename(img_path), pad=5)
+        
 
         # Keep pixels square like ImageJ
         self.ax.set_aspect('equal')
