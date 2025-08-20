@@ -754,16 +754,28 @@ class TomoCuPyGUI(QWidget):
         self.max_input.setText(str(self.vmax))
 
     #auto contrast function
-    def auto_img_contrast(self, ratio=0.9):
-        """clip saturated pixels with 0.35%, similar to Fiji B&C auto function """
-        if self._current_img is not None:
-            self.vmin = round(self.vmin * ratio, 5)
-            self.vmax = round(self.vmax * ratio, 5)
-        else:
+    def auto_img_contrast(self, step=0.35, cap=10.0):
+        """Fiji-like Auto: each click increases the saturation percentage."""
+        if self._current_img is None:
             self.log_output.append("⚠️ No image loaded to auto contrast.")
             return
-        self.min_input.setText(str(self.vmin))  
-        self.max_input.setText(str(self.vmax))
+
+        self._auto_sat_pct = min(getattr(self, "_auto_sat_pct", 0.0) + step, cap)
+
+        a = np.asarray(self._current_img, dtype=float).ravel()
+        a = a[np.isfinite(a)]
+        if a.size == 0:
+            self.log_output.append("⚠️ No pixels to auto contrast.")
+            return
+
+        per_tail = self._auto_sat_pct / 2.0  # already in percent
+        lo, hi = np.nanpercentile(a, [per_tail, 100.0 - per_tail])
+        if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
+            lo, hi = float(np.nanmin(a)), float(np.nanmax(a))
+            if lo >= hi: hi = lo + 1.0
+
+        self.vmin, self.vmax = float(round(lo, 5)), float(round(hi, 5))
+        self.min_input.setText(str(self.vmin)); self.max_input.setText(str(self.vmax))
         self.refresh_current_image()
 
     def reset_img_contrast(self):
