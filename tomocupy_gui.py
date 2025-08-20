@@ -11,9 +11,11 @@ from PySide6.QtWidgets import (
     QFileDialog, QTextEdit, QLineEdit, QLabel, QProgressBar,
     QComboBox, QSlider, QGroupBox, QSizePolicy, QMessageBox
 )
-from PySide6.QtCore import Qt, QEvent, QProcess
+from PySide6.QtCore import Qt, QEvent, QProcess, QRectF, QPointF
 from PIL import Image
 import matplotlib as mpl
+from matplotlib.widgets import RectangleSelector
+
 
 GUI_path = Path(__file__).resolve().parent
 mpl.rcdefaults()
@@ -23,7 +25,7 @@ mpl.style.use(f"{GUI_path}/tomoGUI_mpl_format.mplstyle")
 class TomoCuPyGUI(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("TomoCuPy Reconstruction GUI")
+        self.setWindowTitle("TomoCuPy-Tomolog GUI")
         self.resize(1650, 950)
 
         # State
@@ -201,6 +203,10 @@ class TomoCuPyGUI(QWidget):
         self.fig = Figure(figsize=(5, 6.65))
         self.canvas = FigureCanvas(self.fig)
         self.ax = self.fig.add_subplot(111)
+        self.rect_selector = None  # Placeholder for rectangle selector
+        self.roi_extent = None  # Placeholder for ROI extent
+        self._drawing_roi = False  # Flag to track if ROI is being drawn
+        self.canvas.mpl_connect("button_press_event", self._on_canvas_click)
         self.toolbar = NavigationToolbar(self.canvas, self)
         toolbar_row.addWidget(self.toolbar)
         
@@ -214,12 +220,16 @@ class TomoCuPyGUI(QWidget):
         toolbar_row.addWidget(self.cmap_box)
 
         #auto/reset scale image button
+        draw_box_btn = QPushButton("Draw")
+        draw_box_btn.clicked.connect(self.draw_box)
+        draw_box_btn.setFixedWidth(48)
         auto_scale_btn = QPushButton("Auto")
         auto_scale_btn.setFixedWidth(48)
         auto_scale_btn.clicked.connect(self.auto_img_contrast)
         reset_scale_btn = QPushButton("Reset")
         reset_scale_btn.setFixedWidth(48)
         reset_scale_btn.clicked.connect(self.reset_img_contrast)
+        toolbar_row.addWidget(draw_box_btn)
         toolbar_row.addWidget(auto_scale_btn)
         toolbar_row.addWidget(reset_scale_btn)
 
@@ -387,7 +397,12 @@ class TomoCuPyGUI(QWidget):
             vmax = None
         self.vmin = vmin
         self.vmax = vmax
-        self.refresh_current_image()
+        im = self.ax.images[0] if self.ax.images else None
+        if im is not None and self.vmin is not None and self.vmax is not None:
+            im.set_clim(self.vmin, self.vmax)
+            self.canvas.draw_idle()
+        else:
+            self.refresh_current_image()
 
     #add refresh helper
     def refresh_current_image(self):
@@ -753,51 +768,147 @@ class TomoCuPyGUI(QWidget):
         self.min_input.setText(str(self.vmin))
         self.max_input.setText(str(self.vmax))
 
+    #draw box for auto contrast
+    def draw_box(self):
+        """Enable interactive ROI drawing. Drag to create; click to finish."""
+        if self._current_img is None:
+            self.log_output.append("⚠️ No image loaded to draw box.")
+            return
+
+        # (Re)create selector if needed
+        if self.rect_selector is None:
+            self.rect_selector = RectangleSelector(
+                self.ax,
+                self._on_rect_complete,     # callback on release
+                useblit=True,
+                button=[1],                 # left mouse
+                interactive=True,
+                minspanx=2, minspany=2,
+                spancoords='data',
+                drawtype='box'
+            )
+        self._drawing_roi = True
+        self.roi_extent = None
+        self.rect_selector.set_active(True)
+        self.log_output.append("Drag to draw ROI, release to set. Any click on image will hide ROI.")
+
+    #This is the ROI-complete & click-to-hide handler
+    def _on_rect_complete(self, eclick, erelease):
+        """Store ROI extents when user finishes dragging the rectangle."""
+        x0, y0 = eclick.xdata, eclick.ydata
+        x1, y1 = erelease.xdata, erelease.ydata
+        if None in (x0, y0, x1, y1):
+            self.roi_extent = None
+            self._drawing_roi = False
+            return
+        # normalize to (min,max)
+        self.roi_extent = (min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1))
+        self._drawing_roi = False
+        self.log_output.append(
+            f"ROI set: x[{int(self.roi_extent[0])}:{int(self.roi_extent[1])}], "
+            f"y[{int(self.roi_extent[2])}:{int(self.roi_extent[3])}]"
+        )
+
+    def _on_canvas_click(self, event):
+        """Any click on the image hides/removes the ROI (unless we are mid-draw)."""
+        if event.inaxes != self.ax:
+            return
+        if self._drawing_roi:
+            return  # ignore the release/extra clicks during drawing
+        if self.roi_extent is None and self.rect_selector is None:
+            return
+
+        # hide selector & clear ROI
+        try:
+            if self.rect_selector is not None:
+                self.rect_selector.set_active(False)
+                # hide selector artists if present (version-dependent)
+                for art in getattr(self.rect_selector, 'artists', []):
+                    art.set_visible(False)
+                self.rect_selector = None
+        except Exception:
+            pass
+        self.roi_extent = None
+        self.canvas.draw_idle()
+        self.log_output.append("ROI cleared.")
+
+
+
     #auto contrast function
     def auto_img_contrast(self, saturation=0.35):
-        """Fiji-like Auto: each click trims tails within the current display window."""
+        """Fiji-like Auto: trims tails within current window; uses ROI if present; never edits pixels."""
         if self._current_img is None:
             self.log_output.append("⚠️ No image loaded to auto contrast.")
             return
 
-        a = np.asarray(self._current_img, dtype=float).ravel()
+        img = self._current_img
+
+        # ROI slice if available
+        if self.roi_extent is not None:
+            x0, x1, y0, y1 = self.roi_extent
+            h, w = img.shape[:2]
+            # clamp & cast to indices
+            x0 = max(0, min(w, int(np.floor(x0))))
+            x1 = max(0, min(w, int(np.ceil(x1))))
+            y0 = max(0, min(h, int(np.floor(y0))))
+            y1 = max(0, min(h, int(np.ceil(y1))))
+            if x1 <= x0 or y1 <= y0:
+                self.log_output.append("⚠️ ROI too small.")
+                return
+            data = img[y0:y1, x0:x1]
+            roi_note = "ROI"
+        else:
+            data = img
+            roi_note = ""
+
+        a = np.asarray(data, dtype=float).ravel()
         a = a[np.isfinite(a)]
         if a.size == 0:
-            self.log_output.append("⚠️ No pixels to auto contrast.")
+            self.log_output.append("⚠️ No finite pixels for Auto.")
             return
 
-        # interpret saturation given as 0.35% or 0.0035 fraction
+        # interpret 0.35 or 0.0035
         sat = float(saturation)
-        sat_pct = sat * 100 if sat < 0.01 else sat
+        sat_pct = sat * 100.0 if sat < 0.01 else sat
         per_tail = sat_pct / 2.0
 
-        # restrict to what's currently visible (Fiji-like iterative tightening)
-        vmin = getattr(self, "vmin", float(np.nanmin(a)))
-        vmax = getattr(self, "vmax", float(np.nanmax(a)))
+        # current window
+        vmin = self.vmin if self.vmin is not None else float(np.nanmin(a))
+        vmax = self.vmax if self.vmax is not None else float(np.nanmax(a))
         vis = a[(a >= vmin) & (a <= vmax)]
-        # fallback if the visible set is tiny
         if vis.size < 64:
             vis = a
 
-        # compute new window
         lo, hi = np.nanpercentile(vis, [per_tail, 100.0 - per_tail])
         if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
             lo, hi = float(np.nanmin(vis)), float(np.nanmax(vis))
-            if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
-                hi = lo + 1.0  # tiny window fallback
+            if lo >= hi:
+                hi = lo + 1.0
 
         new_vmin, new_vmax = float(round(lo, 5)), float(round(hi, 5))
-        if (new_vmin, new_vmax) == (vmin, vmax):
-            self.log_output.append("Auto: display range already optimal for current window.")
+        if (new_vmin, new_vmax) == (self.vmin, self.vmax):
+            self.log_output.append("Auto B&C optimal.")
             return
 
         self.vmin, self.vmax = new_vmin, new_vmax
-        self.min_input.setText(str(self.vmin)); self.max_input.setText(str(self.vmax))
-        self.refresh_current_image()
+
+        # update inputs (avoid signal loops if you later connect them to refresh)
+        self.min_input.setText(str(self.vmin))
+        self.max_input.setText(str(self.vmax))
+
+        # >>> IMPORTANT: update clim on existing artist instead of reloading image
+        im = self.ax.images[0] if self.ax.images else None
+        if im is not None:
+            im.set_clim(self.vmin, self.vmax)
+            self.canvas.draw_idle()
+        else:
+            # if no image artist (shouldn't happen), fall back
+            self.refresh_current_image()
+
+        self.log_output.append(f"Auto{roi_note}: vmin={self.vmin}, vmax={self.vmax}")
 
 
     def reset_img_contrast(self):
-        """Reset contrast to original min/max values."""
         if self._current_img is not None:
             self._current_img = self._safe_open_image(self._current_img_path)
             self.vmin, self.vmax = round(self._current_img.min(), 5), round(self._current_img.max(), 5)
