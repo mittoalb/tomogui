@@ -785,7 +785,7 @@ class TomoCuPyGUI(QWidget):
                 interactive=True,
                 minspanx=2, minspany=2,
                 spancoords='data',
-                drawtype='box'
+                interactive=True
             )
         self._drawing_roi = True
         self.roi_extent = None
@@ -904,9 +904,6 @@ class TomoCuPyGUI(QWidget):
         else:
             # if no image artist (shouldn't happen), fall back
             self.refresh_current_image()
-
-        self.log_output.append(f"Auto{roi_note}: vmin={self.vmin}, vmax={self.vmax}")
-
 
     def reset_img_contrast(self):
         if self._current_img is not None:
