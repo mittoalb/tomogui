@@ -9,9 +9,9 @@ from matplotlib.figure import Figure
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QTextEdit, QLineEdit, QLabel, QProgressBar,
-    QComboBox, QSlider, QGroupBox, QSizePolicy
+    QComboBox, QSlider, QGroupBox, QSizePolicy, QMessageBox
 )
-from PySide6.QtCore import Qt, QEvent
+from PySide6.QtCore import Qt, QEvent, QProcess
 from PIL import Image
 import matplotlib as mpl
 
@@ -737,10 +737,9 @@ class TomoCuPyGUI(QWidget):
 
     def set_image_scale(self, img_path):
         img = np.array(Image.open(img_path))
-        if self.vmin is None or self.vmax is None:
-            self.vmin, self.vmax = round(img.min(),6), round(img.max(),6)
-            self.min_input.setText(str(self.vmin))
-            self.max_input.setText(str(self.vmax))
+        self.vmin, self.vmax = round(0.95*img.min(),5), round(0.95*img.max(),5)  #use 95% of min.max as auto
+        self.min_input.setText(str(self.vmin))
+        self.max_input.setText(str(self.vmax))
 
 
     def update_try_slice(self):
