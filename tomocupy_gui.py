@@ -757,8 +757,8 @@ class TomoCuPyGUI(QWidget):
     def auto_img_contrast(self, ratio=0.8):
         """clip saturated pixels with 0.35%, similar to Fiji B&C auto function """
         if self._current_img is not None:
-            self.v_min = round(self.v_min * ratio, 5)
-            self.v_max = round(self.v_max * ratio, 5)
+            self.vmin = round(self.vmin * ratio, 5)
+            self.vmax = round(self.vmax * ratio, 5)
         else:
             self.log_output.append("⚠️ No image loaded to auto contrast.")
             return
