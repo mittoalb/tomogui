@@ -782,7 +782,6 @@ class TomoCuPyGUI(QWidget):
                 self._on_rect_complete,     # callback on release
                 useblit=True,
                 button=[1],                 # left mouse
-                interactive=True,
                 minspanx=2, minspany=2,
                 spancoords='data',
                 interactive=True
