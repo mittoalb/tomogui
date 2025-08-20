@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt, QEvent, QProcess, QRectF, QPointF
 from PIL import Image
 import matplotlib as mpl
 from matplotlib.widgets import RectangleSelector
+from matplotlib.backend_bases import MouseButton
 
 
 GUI_path = Path(__file__).resolve().parent
@@ -212,6 +213,7 @@ class TomoCuPyGUI(QWidget):
         self._drawing_roi = False  # Flag to track if ROI is being drawn
         self.canvas.mpl_connect("button_press_event", self._on_canvas_click)
         self.toolbar = NavigationToolbar(self.canvas, self)
+        self.canvas.mpl_connect('button_release_event', self._auto_disable_tools_once)
         toolbar_row.addWidget(self.toolbar)
         
 
@@ -792,7 +794,7 @@ class TomoCuPyGUI(QWidget):
                 button=[1],                 # left mouse
                 minspanx=2, minspany=2,
                 spancoords='data',
-                interactive=False,
+                interactive=True,
                 props=style
             )
         self._drawing_roi = True
@@ -890,9 +892,9 @@ class TomoCuPyGUI(QWidget):
             self.log_output.append("⚠️ No finite pixels for Auto.")
             return
 
-        sat = float(saturation)
-        sat_pct = sat * 100.0 if sat < 0.01 else sat
-        per_tail = sat_pct / 2.0
+        #sat = float(saturation)
+        #sat_pct = sat * 100.0 if sat < 0.01 else sat
+        #per_tail = sat_pct / 2.0
 
         # current window
         vmin = self.vmin if self.vmin is not None else float(np.nanmin(a))
@@ -901,7 +903,7 @@ class TomoCuPyGUI(QWidget):
         if vis.size < 64:
             vis = a
 
-        lo, hi = np.nanpercentile(vis, [per_tail, 100.0 - per_tail])
+        lo, hi = np.nanpercentile(vis, [5,95]) #hard coded to 5%
         if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
             lo, hi = float(np.nanmin(vis)), float(np.nanmax(vis))
             if lo >= hi:
@@ -1002,6 +1004,38 @@ class TomoCuPyGUI(QWidget):
         self._last_xlim = self.ax.get_xlim()
         self._last_ylim = self.ax.get_ylim()
         self._last_image_shape = (h, w)
+
+    def _auto_disable_tools_once(self, event):
+        """Turn off Zoom (and optionally Pan) after a single drag-release."""
+        # Only care about releases inside the axes and from left mouse button
+        if event.inaxes is None:
+            return
+        if event.button not in (MouseButton.LEFT, 1):
+            return
+
+        active = getattr(self.toolbar, "_active", None)  # 'ZOOM', 'PAN', or None
+        # One-shot Zoom
+        if active == 'ZOOM':
+            # toggle off
+            try:
+                self.toolbar.zoom()   # NavigationToolbar2QT toggle method
+            except Exception:
+                pass
+            # optional: clear mode text if your UI shows it
+            try:
+                self.toolbar.set_message('')
+            except Exception:
+                pass
+        #One-shot Pan
+        if active == 'PAN':
+             try:
+                 self.toolbar.pan()
+             except Exception:
+                 pass
+             try:
+                 self.toolbar.set_message('')
+             except Exception:
+                 pass
 
     def get_note_value(self): # for tomolog note
         note = self.note_input.text().strip()
