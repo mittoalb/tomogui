@@ -906,7 +906,7 @@ class TomoCuPyGUI(QWidget):
         if vis.size < 64:
             vis = a
 
-        lo, hi = np.nanpercentile(vis, [3,97]) #hard coded to 3%
+        lo, hi = np.nanpercentile(vis, [2,98]) #hard coded to 2%
         if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
             lo, hi = float(np.nanmin(vis)), float(np.nanmax(vis))
             if lo >= hi:
