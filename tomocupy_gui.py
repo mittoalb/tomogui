@@ -682,6 +682,7 @@ class TomoCuPyGUI(QWidget):
                     cor_data = {}
         else:
             cor_data = {}
+            fns = []
         if proj_file in fns:
             overfn_msg_box = QMessageBox(self)
             overfn_msg_box.setIcon(QMessageBox.Warning)
