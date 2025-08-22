@@ -1071,7 +1071,8 @@ class TomoCuPyGUI(QWidget):
             cmap=self.current_cmap,
             vmin=self.vmin,
             vmax=self.vmax,
-            origin="upper"
+            origin="upper",
+            extent=[0, w, h, 0]
         )
         self.ax.set_title(os.path.basename(img_path), pad=5)
         self.ax.set_aspect('equal')
