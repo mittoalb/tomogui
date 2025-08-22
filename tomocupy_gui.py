@@ -1281,7 +1281,6 @@ class TomoCuPyGUI(QWidget):
             if extra_params:
                 cmd.extend(extra_params.split())
             # Run the command
-            self.log_output.append(f">>> Running Tomolog: {' '.join(cmd)}")
             QApplication.processEvents()  # Force UI to update before running the process
             code = self.run_command_live(cmd, proj_file=input_fn, job_label="tomolog",wait=True)
             if code == 0:
