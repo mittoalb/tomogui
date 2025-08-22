@@ -1252,11 +1252,11 @@ class TomoCuPyGUI(QWidget):
                     except ValueError:
                         self.log_output.append("❌[ERROR] Invalid scan number: {sn}")
             for n in numbers:
-                fn = os.path.join(data_folder,f"*{n}.h5")
+                fn = os.path.join(data_folder,f"*{n:04d}.h5")
                 try:
                     filename = glob.glob(fn)[0]
                 except IndexError:
-                    self.log_output.append(f"Scan {n} not exist, stop")
+                    self.log_output.append(f"Scan {n:04d} not exist, stop")
                     break
                 flist.append(filename)
         note_value = self.get_note_value()
@@ -1282,13 +1282,11 @@ class TomoCuPyGUI(QWidget):
             # Run the command
             self.log_output.append(f">>> Running Tomolog: {' '.join(cmd)}")
             QApplication.processEvents()  # Force UI to update before running the process
-            try:
-                self.run_command_live(cmd, proj_file=input_fn, job_label="tomolog")
-                self.log_output.append(f"✅ Tomolog finished successfully with scan {input_fn}")
-            except subprocess.CalledProcessError as e:
-                self.log_output.append(f"❌[ERROR] Tomolog failed with code {e.returncode}")
-            except Exception as e:
-                self.log_output.append(f"❌[ERROR] Failed to run Tomolog: {e}")
+            code = self.run_command_live(cmd, proj_file=input_fn, job_label="tomolog",wait=True)
+            if code == 0:
+                self.log_output.append(f"✅ Done try recon {input_fn}")
+            else:
+                self.log_output.append(f"❌ Try recon {input_fn} failed.")
 
 
 
