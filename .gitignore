@@ -164,8 +164,7 @@ cython_debug/
 # Conda environments
 conda-meta/
 .conda/
-environment.yml
-environment.yaml
+
 
 # Pixi environments and locks
 .pixi/
