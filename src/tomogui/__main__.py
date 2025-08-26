@@ -1,4 +1,3 @@
-"""Main entry point for the TomoCuPy GUI application."""
 import os
 os.environ['QT_QPA_PLATFORM'] = 'xcb'
 

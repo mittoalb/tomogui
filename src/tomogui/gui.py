@@ -1,10 +1,6 @@
-import os
-os.environ['QT_QPA_PLATFORM'] = 'xcb'
-
-import sys, os, glob, json, subprocess
+import os, glob, json
 import numpy as np
 import matplotlib
-from pathlib import Path
 import importlib.resources
 matplotlib.use("Qt5Agg")
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -18,16 +14,15 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QEvent, QProcess, QEventLoop
 
 from PIL import Image
-import matplotlib as mpl
 from matplotlib.widgets import RectangleSelector
 from matplotlib.backend_bases import MouseButton
 
 
 # Load matplotlib style from package resources
-mpl.rcdefaults()
+matplotlib.rcdefaults()
 try:
     with importlib.resources.path('tomo_gui.styles', 'tomoGUI_mpl_format.mplstyle') as style_path:
-        mpl.style.use(str(style_path))
+        matplotlib.style.use(str(style_path))
 except (ImportError, FileNotFoundError):
     # Fallback if style file is not found
     pass
@@ -986,7 +981,7 @@ class TomoGUI(QWidget):
             self.max_input.setText(str(self.vmax))
             self.refresh_current_image()
         else:
-            self.log_output.append("⚠️ No image loaded to reset contrast.")
+            self.log_output.append("No image loaded to reset contrast.")
 
     def update_try_slice(self):
         self._keep_zoom = True

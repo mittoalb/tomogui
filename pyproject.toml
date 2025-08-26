@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tomogui"
 version = "1.0.0"
-description = "GUI interface for TomoCuPy tomographic reconstruction"
+description = "GUI interface for TomoCuPy and TomoLog"
 authors = [
-    {name = "Xiaoyang Liu", email = "your.email@example.com"},
+    {name = "Xiaoyang Liu", email = "XXX@XXX.gov"},
     {name = "Alberto Mittone", email = "amittone@anl.gov"}
 ]
 license = {text = "MIT"}
