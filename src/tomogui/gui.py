@@ -78,10 +78,10 @@ class TomoGUI(QWidget):
         self.recon_way_box = QComboBox()
         self.recon_way_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.recon_way_box.addItems(["recon","recon_step"])
-        self.recon_way_box.setCurrentIndex(1) #make manual as default
+        self.recon_way_box.setCurrentIndex(0) #make recon as default
         cor_layout.addWidget(self.recon_way_box)
 
-        cor_layout.addWidget(QLabel("Center of rotation method"))
+        cor_layout.addWidget(QLabel("COR method"))
         self.cor_method_box = QComboBox()
         self.cor_method_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.cor_method_box.addItems(["auto","manual"])
@@ -568,8 +568,8 @@ class TomoGUI(QWidget):
         if not proj_file:
             self.log_output.append(f"❌ No file")
             return
-        recon_way = self.recon_way_box.currentData()
-        cor_method = self.cor_method_box.currentData()
+        recon_way = self.recon_way_box.currentData().text().strip()
+        cor_method = self.cor_method_box.currentData().text().strip()
         cor_val = self.cor_input.text().strip()
         if cor_method == "auto":
             if cor_val:
@@ -661,8 +661,8 @@ class TomoGUI(QWidget):
         if not os.path.isdir(folder):
             self.log_output.append("❌[ERROR] Invalid data folder.")
             return
-        recon_way = self.recon_way_box.currentData()
-        cor_method = self.cor_method_box.currentData()
+        recon_way = self.recon_way_box.currentData().text().strip()
+        cor_method = self.cor_method_box.currentData().text().strip()
         cor_val = self.cor_input.text().strip()
         if cor_method == 'auto':
             if cor_val:
