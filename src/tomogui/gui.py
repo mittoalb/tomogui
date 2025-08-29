@@ -369,7 +369,7 @@ class TomoGUI(QWidget):
     def help_tomo(self):
         """Run the CLI `tomocupy recon (or recon_steps) -h` and show output in the GUI log."""
         name = "tomocupy-help"
-        recon_way = self.recon_way_box.currentData()
+        recon_way = self.recon_way_box.currentText()
         self.log_output.append(f"📖[{name}] tomocupy {recon_way} -h")
 
         p = QProcess(self)
