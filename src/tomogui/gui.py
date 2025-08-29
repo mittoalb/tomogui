@@ -77,7 +77,7 @@ class TomoGUI(QWidget):
 
         self.recon_way_box = QComboBox()
         self.recon_way_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.recon_way_box.addItems(["recon","recon_step"])
+        self.recon_way_box.addItems(["recon","recon_steps"])
         self.recon_way_box.setCurrentIndex(0) #make recon as default
         cor_layout.addWidget(self.recon_way_box)
 
