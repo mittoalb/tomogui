@@ -16,7 +16,7 @@ from PyQt5.QtCore import Qt, QEvent, QProcess, QEventLoop
 from PIL import Image
 from matplotlib.widgets import RectangleSelector
 from matplotlib.backend_bases import MouseButton
-
+import h5py
 
 # Load matplotlib style from package resources
 matplotlib.rcdefaults()
@@ -31,7 +31,7 @@ except (ImportError, FileNotFoundError):
 class TomoGUI(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("TomoCuPy-Tomolog GUI")
+        self.setWindowTitle("TomoGUI")
         self.resize(1650, 950)
 
         # State
@@ -72,10 +72,24 @@ class TomoGUI(QWidget):
         proj_layout.addWidget(refresh_btn2)
         left_layout.addLayout(proj_layout)
 
-        # Rotation axis + buttons
+        # recon/recon_step + Rotation axis method + input guess COR + config buttons
         cor_layout = QHBoxLayout()
+
+        self.recon_way_box = QComboBox()
+        self.recon_way_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.recon_way_box.addItems(["recon","recon_step"])
+        self.recon_way_box.setCurrentIndex(1) #make manual as default
+        cor_layout.addWidget(self.recon_way_box)
+
+        cor_layout.addWidget(QLabel("Center of rotation method"))
+        self.cor_method_box = QComboBox()
+        self.cor_method_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.cor_method_box.addItems(["auto","manual"])
+        self.cor_method_box.setCurrentIndex(1) #make manual as default
+        cor_layout.addWidget(self.cor_method_box)
+
         self.cor_input = QLineEdit()
-        cor_layout.addWidget(QLabel("Center of Rotation:"))
+        cor_layout.addWidget(QLabel("COR:"))
         cor_layout.addWidget(self.cor_input)
 
         load_config_btn = QPushButton("Load Config")
@@ -84,6 +98,10 @@ class TomoGUI(QWidget):
         save_config_btn.clicked.connect(self.save_config)
         cor_layout.addWidget(load_config_btn)
         cor_layout.addWidget(save_config_btn)
+
+        view_prj_btn = QPushButton("View raw")
+        view_prj_btn.clicked.connect(self.view_raw)
+        cor_layout.addWidget(view_prj_btn)
 
         help_tomo_btn = QPushButton("help")
         help_tomo_btn.clicked.connect(self.help_tomo)
@@ -349,9 +367,10 @@ class TomoGUI(QWidget):
     # ===== HELPER METHODS =====
     
     def help_tomo(self):
-        """Run the CLI `tomocupy recon -h` and show output in the GUI log."""
+        """Run the CLI `tomocupy recon (or recon_steps) -h` and show output in the GUI log."""
         name = "tomocupy-help"
-        self.log_output.append(f"📖[{name}] tomocupy recon -h")
+        recon_way = self.recon_way_box.currentData()
+        self.log_output.append(f"📖[{name}] tomocupy {recon_way} -h")
 
         p = QProcess(self)
         p.setProcessChannelMode(QProcess.SeparateChannels)
@@ -384,7 +403,7 @@ class TomoGUI(QWidget):
             self.process = []
         self.process.append((p, name))
 
-        p.start("tomocupy", ["recon", "-h"])
+        p.start("tomocupy", [str(recon_way), "-h"])
 
     def update_cmap(self):
         self.current_cmap = self.cmap_box.currentText()
@@ -549,23 +568,38 @@ class TomoGUI(QWidget):
         if not proj_file:
             self.log_output.append(f"❌ No file")
             return
+        recon_way = self.recon_way_box.currentData()
+        cor_method = self.cor_method_box.currentData()
         cor_val = self.cor_input.text().strip()
-        try:
-            cor = float(cor_val)
-        except ValueError:
-            self.log_output.append(f"❌ wrong rotation axis input")
-            return
+        if cor_method == "auto":
+            if cor_val:
+                self.log_output.append(f"❌ no manual cor for auto method")
+                return
+        else:
+            try:
+                cor = float(cor_val)
+            except ValueError:
+                self.log_output.append(f"❌ wrong rotation axis input")
+                return
         config_text = self.config_editor_try.toPlainText()
         if not config_text.strip():
             self.log_output.append("⚠️ not use conf")
         temp_try = os.path.join(self.data_path.text(), "temp_try.conf")
         with open(temp_try, "w") as f:
             f.write(config_text)
-        cmd = ["tomocupy", "recon", 
-               "--reconstruction-type", "try", 
-               "--config", temp_try, 
-               "--file-name", proj_file,
-               "--rotation-axis", str(cor)]
+        if cor_method == "auto":
+            cmd = ["tomocupy", str(recon_way), 
+                "--reconstruction-type", "try", 
+                "--config", temp_try, 
+                "--file-name", proj_file,
+                "--rotation-axis-auto", str(cor_method)]
+        else:
+            cmd = ["tomocupy", str(recon_way), 
+                "--reconstruction-type", "try", 
+                "--config", temp_try, 
+                "--file-name", proj_file,
+                "--rotation-axis-method", str(cor_method),
+                "--rotation-axis", str(cor)]
         code = self.run_command_live(cmd, proj_file=proj_file, job_label="Try recon", wait=True)
         try:
             if code == 0:
@@ -582,6 +616,7 @@ class TomoGUI(QWidget):
 
     def full_reconstruction(self):
         proj_file = self.proj_file_box.currentData()
+        recon_way = self.recon_way_box.currentData()
         try:
             cor_value = float(self.cor_input_full.text())
         except ValueError:
@@ -593,7 +628,7 @@ class TomoGUI(QWidget):
         temp_full = os.path.join(self.data_path.text(), "temp_full.conf")
         with open(temp_full, "w") as f:
             f.write(config_text)
-        cmd = ["tomocupy", "recon",
+        cmd = ["tomocupy", str(recon_way),
                "--reconstruction-type", "full",
                "--config", temp_full, 
                "--file-name", proj_file, 
@@ -626,13 +661,19 @@ class TomoGUI(QWidget):
         if not os.path.isdir(folder):
             self.log_output.append("❌[ERROR] Invalid data folder.")
             return
+        recon_way = self.recon_way_box.currentData()
+        cor_method = self.cor_method_box.currentData()
         cor_val = self.cor_input.text().strip()
-        try:
-            cor = float(cor_val)
-        except ValueError:
-            self.log_output.append(f"❌ wrong rotation axis input")
-            return
-
+        if cor_method == 'auto':
+            if cor_val:
+                self.log_output.append(f"❌ no manual cor for auto method")
+                return
+        else:
+            try:
+                cor = float(cor_val)
+            except ValueError:
+                self.log_output.append(f"❌ wrong rotation axis input")
+                return
         config_text = self.config_editor_try.toPlainText()
         if not config_text.strip():
             self.log_output.append("⚠️ not use conf.")
@@ -640,6 +681,21 @@ class TomoGUI(QWidget):
         with open(temp_try, "w") as f:
             f.write(config_text)
         summary = {"done": [], "fail": [], 'no_file': []}
+        if cor_method == "auto":
+            cmd = ["tomocupy", str(recon_way), 
+                    "--reconstruction-type", "try", 
+                    "--config", temp_try, 
+                    "--file-name", proj_file,
+                    "--rotation-axis-auto", str(cor_method)
+                    ]
+        else:
+            cmd = ["tomocupy", str(recon_way), 
+                    "--reconstruction-type", "try", 
+                    "--config", temp_try, 
+                    "--file-name", proj_file,
+                    "--rotation-axis-auto", str(cor_method),
+                    "--rotation-axis", str(cor)
+                    ]
         try:
             for i, scan_num in enumerate(range(start_num, end_num + 1), start=1):
                 scan_str = f"{scan_num:04d}"
@@ -649,13 +705,6 @@ class TomoGUI(QWidget):
                     summary['no_file'].append(scan_str)
                     continue
                 proj_file = match_files[0]
-
-                cmd = ["tomocupy", "recon", 
-                    "--reconstruction-type", "try", 
-                    "--config", temp_try, 
-                    "--file-name", proj_file,
-                    "--rotation-axis", str(cor)
-                    ]
                 code = self.run_command_live(cmd, proj_file=proj_file, job_label=f'batch try {i}/{total}', wait=True)
                 if code == 0:
                     self.log_output.append(f"✅ Done try recon {proj_file}")
@@ -713,7 +762,6 @@ class TomoGUI(QWidget):
             self.log_output.append(f"✅Done batch full, check summary: {str(summary)}")
 
     # ===== COR MANAGEMENT =====
-
     def record_cor_to_json(self):
         data_folder = self.data_path.text().strip()
         cor_value = self.cor_input_full.text().strip()
@@ -791,6 +839,18 @@ class TomoGUI(QWidget):
             self.log_output.append(f"❌[ERROR] Failed to load COR log: {e}")
 
     # ===== IMAGE VIEWING =====
+    def view_raw(self):
+        "use h5py read, assume same structure for aps IMG"
+        data_folder = self.data_path.text().strip()
+        proj_file = self.proj_file_box.currentData()
+        raw_fn = os.path.join(data_folder, proj_file)
+        with h5py.File(raw_fn) as raw:
+            flat = raw['/exhcange/data_white']
+            dark = raw['/exchange/data_dark']
+            data = raw['/exchange/data']
+
+
+
 
     def view_try_reconstruction(self):
         data_folder = self.data_path.text().strip()
