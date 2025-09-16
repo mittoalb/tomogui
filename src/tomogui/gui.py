@@ -1056,7 +1056,7 @@ class TomoGUI(QWidget):
     def update_raw_slice(self):
         self._keep_zoom = True
         idx = self.slice_slider.value()
-        if 0 <= idx < len(self.raw_files_num):  #needs to remember to change
+        if 0 <= idx < self.raw_files_num:  #needs to remember to change
             self.show_image(self.preview_files[idx])
 
 
