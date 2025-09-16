@@ -851,7 +851,7 @@ class TomoGUI(QWidget):
         self._keep_zoom = False
         self._clear_roi()
         self._reset_view_state()        
-        self.set_image_scale(self._raw_h5['/exchange/data'][0])
+        self.set_image_scale(self._raw_h5['/exchange/data'][:][0,:,:], flag="raw")
         try:
             self.slice_slider.valueChanged.disconnect()
         except TypeError:
@@ -903,8 +903,11 @@ class TomoGUI(QWidget):
         self.slice_slider.valueChanged.connect(self.update_full_slice)
         self.update_full_slice()
 
-    def set_image_scale(self, img_path):
-        img = np.array(Image.open(img_path))
+    def set_image_scale(self, img_path, flag=None):
+        if flag == "raw":
+            img = img_path
+        else:
+            img = np.array(Image.open(img_path))
         self.vmin, self.vmax = round(img.min(), 5), round(img.max(), 5) 
         self.min_input.setText(str(self.vmin))
         self.max_input.setText(str(self.vmax))
