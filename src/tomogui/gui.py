@@ -429,9 +429,11 @@ class TomoGUI(QWidget):
 
     def refresh_current_image(self):
         if self.full_files and 0 <= self.slice_slider.value() < len(self.full_files):
-            self.show_image(self.full_files[self.slice_slider.value()])
+            self.show_image(img_path=self.full_files[self.slice_slider.value()],flag=None)
         elif self.preview_files and 0 <= self.slice_slider.value() < len(self.preview_files):
-            self.show_image(self.preview_files[self.slice_slider.value()])
+            self.show_image(img_path=self.preview_files[self.slice_slider.value()],flag=None)
+        elif self.raw_files_num and 0 <= self.slice_slider.value() < self.raw_files_num:
+            self.show_image(img_path=self._raw_h5['/exchange/data'][:][self.slice_slider.value(),:,:], flag="raw")
 
     def highlight_editor(self, editor, event):
         editor.setStyleSheet("QTextEdit { border: 2px solid green; font-size: 12.5pt; }")
@@ -1053,24 +1055,24 @@ class TomoGUI(QWidget):
             self.refresh_current_image()
         else:
             self.log_output.append("No image loaded to reset contrast.")
+
     def update_raw_slice(self):
         self._keep_zoom = True
         idx = self.slice_slider.value()
         if 0 <= idx < self.raw_files_num:  
             self.show_image(img_path=idx, flag="raw")
 
-
     def update_try_slice(self):
         self._keep_zoom = True
         idx = self.slice_slider.value()
         if 0 <= idx < len(self.preview_files):
-            self.show_image(self.preview_files[idx])
+            self.show_image(img_path=self.preview_files[idx],flag=None)
 
     def update_full_slice(self):
         self._keep_zoom = True
         idx = self.slice_slider.value()
         if 0 <= idx < len(self.full_files):
-            self.show_image(self.full_files[idx])
+            self.show_image(img_path=self.full_files[idx],flag=None)
 
     def _safe_open_image(self, path, retries=3):
         for _ in range(retries):
@@ -1082,8 +1084,8 @@ class TomoGUI(QWidget):
         with Image.open(path) as im:
             return np.array(im)
 
-    def show_image(self, img_path, flag):
-        #for reconstructed images
+    def show_image(self, img_path, flag=None):
+        #Flag arg to seperate prj and recon 
         if flag == "raw":
             img = self._raw_h5['/exchange/data'][img_path,:,:] #for raw projections, it takes img_path as idx
             img = (img - self.dark)/(self.flat - self.dark)
@@ -1106,7 +1108,7 @@ class TomoGUI(QWidget):
         )
         self.ax.set_title(os.path.basename(str(img_path)), pad=3)
         self.ax.set_aspect('equal')
-
+        self.fig.colorbar(im, ax=self.ax, location="right") #add colorbar on the right of img
         if (self._keep_zoom and
             self._last_image_shape == (h, w) and
             self._last_xlim is not None and
@@ -1124,8 +1126,6 @@ class TomoGUI(QWidget):
         self._last_xlim = self.ax.get_xlim()
         self._last_ylim = self.ax.get_ylim()
         self._last_image_shape = (h, w)
-
-
 
     def _remember_view(self):
         """Record current view so the next image keeps the same zoom/pan."""
