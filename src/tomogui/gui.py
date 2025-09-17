@@ -1172,6 +1172,8 @@ class TomoGUI(QWidget):
             self.show_image(self.full_files[self.slice_slider.value()], flag=None)
         elif self.preview_files and 0 <= self.slice_slider.value() < len(self.preview_files):
             self.show_image(self.preview_files[self.slice_slider.value()], flag=None)
+        elif 0<= self.slice_slider.value() < self.raw_files_num:
+            self.show_image(img_path=self.slice_slider.value(), flag="raw")
 
     def highlight_editor(self, editor, event):
         editor.setStyleSheet("QTextEdit { border: 2px solid green; font-size: 12.5pt; }")
@@ -1628,7 +1630,7 @@ class TomoGUI(QWidget):
         self._keep_zoom = False
         self._clear_roi()
         self._reset_view_state()
-        first_img = np.array(self._raw_h5['/exchange/data'][0, :, :], dtype=np.float32)
+        first_img = self._raw_h5['/exchange/data'][0, :, :]
         self.set_image_scale(first_img, flag="raw")
         try:
             self.slice_slider.valueChanged.disconnect()
