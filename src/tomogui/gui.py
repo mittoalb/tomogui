@@ -1821,8 +1821,11 @@ class TomoGUI(QWidget):
 
     def reset_img_contrast(self): #link to Reset button
         if self._current_img is not None:
-            self._current_img = self._safe_open_image(self._current_img_path)
-            self.vmin, self.vmax = round(self._current_img.min(), 5), round(self._current_img.max(), 5)
+            if self._current_img_path is not str:
+                self._current_img = self._safe_open_prj(self._current_img_path)
+            else:
+                self._current_img = self._safe_open_image(self._current_img_path)
+            self.vmin, self.vmax = round(self._current_img.min(), 5)*0.95, round(self._current_img.max(), 5)*0.95
             self.min_input.setText(str(self.vmin))
             self.max_input.setText(str(self.vmax))
             self.refresh_current_image()
@@ -1856,6 +1859,14 @@ class TomoGUI(QWidget):
                 QApplication.processEvents()
         with Image.open(path) as im:
             return np.array(im)
+    
+    def _safe_open_prj(self,path,retries=3): #path is idx
+        for _ in range(retries):
+            try:
+                return self._raw_h5['/exchange/data'][path,:,:]
+            except Exception:
+                QApplication.processEvents()
+        return self._raw_h5['/exchange/data'][path,:,:]
 
     def show_image(self, img_path, flag=None):
         #Flag arg to seperate prj and recon 
@@ -1879,10 +1890,10 @@ class TomoGUI(QWidget):
             origin="upper",
             extent=[0, w, h, 0]
         )
-        self.ax.set_title(os.path.basename(str(img_path)), pad=5)
+        self.ax.set_title(os.path.basename(str(img_path)), pad=7)
         self.ax.set_aspect('equal')
         if self.cbar == None:
-            self.cbar = self.fig.colorbar(im, ax=self.ax, location="right", fraction=0.03, pad=0.02) #add colorbar on the right of img
+            self.cbar = self.fig.colorbar(im, ax=self.ax, location="right", fraction=0.01, pad=0.01, aspect=35) #add colorbar on the right of img
         else:
             self.cbar.update_normal(im)
         if (self._keep_zoom and
