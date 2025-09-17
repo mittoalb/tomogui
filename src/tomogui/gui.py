@@ -1091,9 +1091,9 @@ class TomoGUI(QWidget):
             img = self._safe_open_image(img_path)
             if img.ndim == 3:
                 img = img[..., 0]
-            h, w = img.shape
-            self._current_img = img
-            self._current_img_path = img_path
+        h, w = img.shape
+        self._current_img = img
+        self._current_img_path = img_path
         self._clear_roi()
         self.ax.clear()
         im = self.ax.imshow(
