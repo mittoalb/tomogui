@@ -1075,15 +1075,22 @@ class TomoGUI(QWidget):
         if 0 <= idx < len(self.full_files):
             self.show_image(img_path=self.full_files[idx],flag=None)
 
-    def _safe_open_image(self, path, retries=3):
+    def _safe_open_image(self, path, flag=None, retries=3): 
+        #add flag to seperate raw, recon
         for _ in range(retries):
             try:
-                with Image.open(path) as im:
-                    return np.array(im)
+                if flag == "raw":
+                    return self._raw_h5['/exchange/data'][path,:,:]
+                else:
+                    with Image.open(path) as im:
+                        return np.array(im)
             except Exception:
                 QApplication.processEvents()
-        with Image.open(path) as im:
-            return np.array(im)
+        if flag == "raw":
+            return self._raw_h5['/exchange/data'][path,:,:]
+        else:
+            with Image.open(path) as im:
+                return np.array(im)
 
     def show_image(self, img_path, flag=None):
         #Flag arg to seperate prj and recon 
