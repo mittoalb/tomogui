@@ -1146,7 +1146,7 @@ class TomoGUI(QWidget):
         self.current_cmap = self.cmap_box.currentText()
         self.refresh_current_image()
 
-    def update_vmin_vmax(self):
+    def update_vmin_vmax(self): #link to min/max input
         try:
             vmin = float(self.min_input.text()) if self.min_input.text() else None
         except ValueError:
@@ -1683,7 +1683,7 @@ class TomoGUI(QWidget):
             img = img_path
         else:
             img = np.array(Image.open(img_path))
-        self.vmin, self.vmax = round(float(np.nanmin(img)), 5), round(float(np.nanmax(img)), 5) 
+        self.vmin, self.vmax = round(float(np.nanmin(img)), 3)*0.95, round(float(np.nanmax(img)), 3)*0.95 
         self.min_input.setText(str(self.vmin))
         self.max_input.setText(str(self.vmax))
 
@@ -1819,7 +1819,7 @@ class TomoGUI(QWidget):
         else:
             self.refresh_current_image()
 
-    def reset_img_contrast(self):
+    def reset_img_contrast(self): #link to Reset button
         if self._current_img is not None:
             self._current_img = self._safe_open_image(self._current_img_path)
             self.vmin, self.vmax = round(self._current_img.min(), 5), round(self._current_img.max(), 5)
@@ -1879,10 +1879,10 @@ class TomoGUI(QWidget):
             origin="upper",
             extent=[0, w, h, 0]
         )
-        self.ax.set_title(os.path.basename(str(img_path)), pad=3)
+        self.ax.set_title(os.path.basename(str(img_path)), pad=5)
         self.ax.set_aspect('equal')
         if self.cbar == None:
-            self.cbar = self.fig.colorbar(im, ax=self.ax, location="right") #add colorbar on the right of img
+            self.cbar = self.fig.colorbar(im, ax=self.ax, location="right", fraction=0.03, pad=0.02) #add colorbar on the right of img
         else:
             self.cbar.update_normal(im)
         if (self._keep_zoom and
