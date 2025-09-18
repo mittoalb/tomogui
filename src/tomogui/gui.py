@@ -261,7 +261,7 @@ class TomoGUI(QWidget):
         self.toolbar.setStyleSheet("QToolButton { padding: 0.2px; }")
         self.toolbar.coordinates = False #disable default coords
         self.canvas.setMouseTracking(True)
-        self.toolbar.setFixedWidth(280)
+        self.toolbar.setFixedWidth(275)
         toolbar_row.addWidget(self.toolbar)
         toolbar_row.addSpacing(1)
         self.coord_label = QLabel("")
