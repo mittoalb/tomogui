@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QTextEdit, QLineEdit, QLabel, QProgressBar,
     QComboBox, QSlider, QGroupBox, QSizePolicy, QMessageBox,
     QTabWidget, QFormLayout, QCheckBox, QSpinBox, QDoubleSpinBox,
-    QScrollArea
+    QScrollArea, QToolButton
 )
 from PyQt5.QtCore import Qt, QEvent, QProcess, QEventLoop, QSize
 
@@ -256,7 +256,7 @@ class TomoGUI(QWidget):
         self._drawing_roi = False
         self.canvas.mpl_connect("button_press_event", self._on_canvas_click)
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
-        self.toolbar.setIconSize(Qt.QSize(16,16))
+        self.toolbar.setIconSize(QSize(16,16))
         self.toolbar.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self.toolbar.coordinates = False #disable default coords
         self.canvas.setMouseTracking(True)
