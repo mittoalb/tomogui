@@ -258,12 +258,12 @@ class TomoGUI(QWidget):
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         self.toolbar.coordinates = False #disable default coords
         self.canvas.setMouseTracking(True)
-        self.toolbar.setFixedWidth(300)
+        self.toolbar.setFixedWidth(250)
         toolbar_row.addWidget(self.toolbar)
-        toolbar_row.addStretch(1)
+        toolbar_row.addStretch(0.5)
         self.coord_label = QLabel("")
-        self.coord_label.setFixedWidth(80)
-        toolbar_row.insertWidget(1, self.coord_label)
+        self.coord_label.setFixedWidth(90)
+        toolbar_row.insertWidget(0.5, self.coord_label)
         try:
             self.toolbar._actions['home'].triggered.connect(self._on_toolbar_home)
         except Exception:
@@ -274,7 +274,7 @@ class TomoGUI(QWidget):
         # Colormap dropdown
         toolbar_row.addWidget(QLabel("Cmap:"))
         self.cmap_box = QComboBox()
-        self.cmap_box.setFixedWidth(48)
+        self.cmap_box.setFixedWidth(50)
         self.cmap_box.addItems(["gray", "viridis", "plasma", "inferno", "magma", "cividis"])
         self.cmap_box.setCurrentText(self.default_cmap)
         self.cmap_box.currentIndexChanged.connect(self.update_cmap)
