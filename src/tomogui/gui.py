@@ -2016,8 +2016,11 @@ class TomoGUI(QWidget):
         self._last_xlim = None
         self._last_ylim = None
         self._last_image_shape = None
-        self.cbar.remove()
-        self.cbar = None
+        if self.cbar == None:
+            pass
+        else:
+            self.cbar.remove()
+            self.cbar = None
 
     def _on_toolbar_home(self):
         # forget any persisted zoom so the next slice uses full extents
