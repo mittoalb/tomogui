@@ -245,7 +245,6 @@ class TomoGUI(QWidget):
         toolbar_row = QHBoxLayout()
         self.fig = Figure(figsize=(5, 6.65))
         self.canvas = FigureCanvas(self.fig)
-        self.canvas.setMouseTracking(True)
         self.ax = self.fig.add_subplot(111)
         self.cbar = None
         self._cax = None
@@ -260,12 +259,17 @@ class TomoGUI(QWidget):
         self._drawing_roi = False
         self.canvas.mpl_connect("button_press_event", self._on_canvas_click)
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
+        self.toolbar.coordinates = False #disable default coords
+        self.canvas.setMouseTracking(True)
+        self.toolbar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         try:
             self.toolbar._actions['home'].triggered.connect(self._on_toolbar_home)
         except Exception:
             pass
         toolbar_row.addWidget(self.toolbar)
-        toolbar_row.addStretch(1)  # gives the toolbar breathing room
+        self.coord_label = QLabel("")
+        self.coord_label.setMinimumWidth(80)
+        toolbar_row.addWidget(self.coord_label)
         self._cid_release = self.canvas.mpl_connect("button_release_event", self._nav_oneshot_release)
 
         # Colormap dropdown
@@ -1154,6 +1158,7 @@ class TomoGUI(QWidget):
 
     def update_cmap(self): #link to cmap dropdown
         self.current_cmap = self.cmap_box.currentText()
+        self.cbar = None # reset colorbar, so next step will redraw it
         self.refresh_current_image()
 
     def update_vmin_vmax(self): #link to min/max input
@@ -1695,12 +1700,11 @@ class TomoGUI(QWidget):
             img = img_path
         else:
             img = np.array(Image.open(img_path))
-        self.vmin, self.vmax = round(float(np.nanmin(img)), 3), round(float(np.nanmax(img[img < 65000])), 3) 
+        self.vmin, self.vmax = round(float(np.nanmin(img)), 3), round(float(np.nanmax(img)), 3) 
         self.min_input.setText(str(self.vmin))
         self.max_input.setText(str(self.vmax))
 
     # ===== ROI AND CONTRAST =====
-
     def draw_box(self):
         """Enable interactive ROI drawing. Drag to create; click to finish."""
         if self._current_img is None:
@@ -1773,6 +1777,27 @@ class TomoGUI(QWidget):
         self.roi_extent = None
         self.canvas.draw_idle()
         self.log_output.append("ROI cleared.")
+
+    def _on_mouse_move(self, event):
+        # show x,y and pixel value when mouse on image
+        if event.inaxes != self.ax or self._current_img is None:
+            if hasattr(self, "coord_label"):
+                self.coord_label.setText("")
+            return
+        x, y = event.xdata, event.ydata
+        if x is None or y is None:
+            if hasattr(self, "coord_label"):
+                self.coord_label.setText("")
+            return
+        h, w = self._current_img.shape[:2]
+        ix, iy = int(round(x)), int(round(y))
+        if 0 <= ix < w and 0 <= iy < h:
+            val = self._current_img[iy, ix]
+            msg = f"({ix}, {iy}) = {round(val, 5)}"
+        else:
+            msg = ""
+        if hasattr(self, "coord_label"):
+            self.coord_label.setText(msg)
 
     def auto_img_contrast(self, saturation=10):
         """Fiji-like Auto: trims tails within current window; uses ROI if present; never edits pixels."""
@@ -1907,10 +1932,9 @@ class TomoGUI(QWidget):
         self.ax.margins(0.01)
         self.ax.set_anchor('C')
         if self.cbar == None:
-            self.cbar = self.fig.colorbar(im, ax=self.ax, fraction=0.018, pad=0.015, shrink=0.95, aspect=30) 
+            self.cbar = self.fig.colorbar(im, ax=self.ax, fraction=0.01, pad=0.005, shrink=0.95, aspect=30) 
         else:
-            self.cbar.update_normal(im)
-            self.cbar.update_ticks()
+            pass
         if (self._keep_zoom and
             self._last_image_shape == (h, w) and
             self._last_xlim is not None and
@@ -1973,7 +1997,7 @@ class TomoGUI(QWidget):
                 pass
 
     def _reset_view_state(self):
-        """Forget any prior zoom/pan so the next image shows full frame."""
+        """Forget any prior zoom/pan and cbar so the next image shows full frame."""
         try:
             mode = getattr(self.toolbar, "mode", "")
             if mode == "zoom rect":
@@ -1991,6 +2015,7 @@ class TomoGUI(QWidget):
         self._last_xlim = None
         self._last_ylim = None
         self._last_image_shape = None
+        self.cbar = None
 
     def _on_toolbar_home(self):
         # forget any persisted zoom so the next slice uses full extents
