@@ -246,10 +246,7 @@ class TomoGUI(QWidget):
         self.fig = Figure(figsize=(5, 6.65))
         self.canvas = FigureCanvas(self.fig)
         self.ax = self.fig.add_subplot(111)
-        self.cbar = None
-        self._cax = None
         self.fig.set_constrained_layout(True)
-        self.fig.set_layout_engine('constrained', h_pad=0.01, w_pad=0.01, wspace=0.3, hspace=0.0)
         self._keep_zoom = False
         self._last_xlim = None
         self._last_ylim = None
@@ -1159,7 +1156,6 @@ class TomoGUI(QWidget):
 
     def update_cmap(self): #link to cmap dropdown
         self.current_cmap = self.cmap_box.currentText()
-        self.cbar.remove() # reset colorbar, so next step will redraw it
         self.refresh_current_image()
 
     def update_vmin_vmax(self): #link to min/max input
@@ -1930,12 +1926,6 @@ class TomoGUI(QWidget):
         )
         self.ax.set_title(os.path.basename(str(img_path)), pad=5.5)
         self.ax.set_aspect('equal', adjustable='box')  # square pixels; obey zoom limits without warnings
-        self.ax.margins(0.01)
-        self.ax.set_anchor('C')
-        if self.cbar == None:
-            self.cbar = self.fig.colorbar(im, ax=self.ax, fraction=0.01, pad=0.005, shrink=0.95, aspect=30) 
-        else:
-            pass
         if (self._keep_zoom and
             self._last_image_shape == (h, w) and
             self._last_xlim is not None and
@@ -1998,7 +1988,7 @@ class TomoGUI(QWidget):
                 pass
 
     def _reset_view_state(self):
-        """Forget any prior zoom/pan and cbar so the next image shows full frame."""
+        """Forget any prior zoom/pan so the next image shows full frame."""
         try:
             mode = getattr(self.toolbar, "mode", "")
             if mode == "zoom rect":
@@ -2016,11 +2006,7 @@ class TomoGUI(QWidget):
         self._last_xlim = None
         self._last_ylim = None
         self._last_image_shape = None
-        if self.cbar == None:
-            pass
-        else:
-            self.cbar.remove()
-            self.cbar = None
+
 
     def _on_toolbar_home(self):
         # forget any persisted zoom so the next slice uses full extents
