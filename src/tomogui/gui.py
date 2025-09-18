@@ -259,6 +259,7 @@ class TomoGUI(QWidget):
         self.canvas.mpl_connect("button_press_event", self._on_canvas_click)
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         toolbar_row.addWidget(self.toolbar)
+        toolbar_row.addStretch(1)  # gives the toolbar breathing room
         self._cid_release = self.canvas.mpl_connect("button_release_event", self._nav_oneshot_release)
 
         # Colormap dropdown
@@ -1145,7 +1146,7 @@ class TomoGUI(QWidget):
 
         p.start("tomocupy", [str(recon_way), "-h"])
 
-    def update_cmap(self):
+    def update_cmap(self): #link to cmap dropdown
         self.current_cmap = self.cmap_box.currentText()
         self.refresh_current_image()
 
