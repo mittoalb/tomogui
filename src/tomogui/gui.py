@@ -256,7 +256,7 @@ class TomoGUI(QWidget):
         self._drawing_roi = False
         self.canvas.mpl_connect("button_press_event", self._on_canvas_click)
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
-        self.toolbar.setIconSize(QSize(22,22))
+        self.toolbar.setIconSize(QSize(23,23))
         self.toolbar.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self.toolbar.coordinates = False #disable default coords
         self.canvas.setMouseTracking(True)
@@ -264,6 +264,7 @@ class TomoGUI(QWidget):
         toolbar_row.addWidget(self.toolbar)
         self.coord_label = QLabel("")
         self.coord_label.setFixedWidth(110)
+        self.coord_label.setStyleSheet("font-size: 10pt;")
         toolbar_row.addWidget(self.coord_label)
         try:
             self.toolbar._actions['home'].triggered.connect(self._on_toolbar_home)
