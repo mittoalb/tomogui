@@ -263,7 +263,7 @@ class TomoGUI(QWidget):
         self.toolbar.setFixedWidth(290)
         toolbar_row.addWidget(self.toolbar)
         self.coord_label = QLabel("")
-        self.coord_label.setFixedWidth(110)
+        self.coord_label.setFixedWidth(120)
         self.coord_label.setStyleSheet("font-size: 10pt;")
         toolbar_row.addWidget(self.coord_label)
         try:
@@ -1794,7 +1794,7 @@ class TomoGUI(QWidget):
         ix, iy = int(round(x)), int(round(y))
         if 0 <= ix < w and 0 <= iy < h:
             val = self._current_img[iy, ix]
-            msg = f"({ix},{iy}): {float(val):.3f}"
+            msg = f"({ix},{iy}): {float(val):.4f}"
         else:
             msg = ""
         if hasattr(self, "coord_label"):
