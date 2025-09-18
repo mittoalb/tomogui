@@ -262,7 +262,7 @@ class TomoGUI(QWidget):
         toolbar_row.addWidget(self.toolbar)
         self.coord_label = QLabel("")
         self.coord_label.setFixedWidth(90)
-        toolbar_row.insertWidget(0.5, self.coord_label)
+        toolbar_row.insertWidget(1, self.coord_label)
         try:
             self.toolbar._actions['home'].triggered.connect(self._on_toolbar_home)
         except Exception:
