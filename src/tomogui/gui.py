@@ -258,6 +258,7 @@ class TomoGUI(QWidget):
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         self.toolbar.setIconSize(QSize(23,23))
         self.toolbar.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self.toolbar.setContentMargins(0.01,0.01,0.01,0.01)
         self.toolbar.coordinates = False #disable default coords
         self.canvas.setMouseTracking(True)
         self.toolbar.setFixedWidth(280)
