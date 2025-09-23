@@ -124,13 +124,13 @@ class TomoGUI(QWidget):
 
         # Tab 1: Configs (contains two existing config editors)
         configs_tab = QWidget()
-        configs_v = QVBoxLayout(configs_tab)
-        self._config_frame_layout = QHBoxLayout()
-        configs_v.addLayout(self._config_frame_layout)
+        #configs_v = QVBoxLayout(configs_tab)
+        #self._config_frame_layout = QHBoxLayout()
+        #configs_v.addLayout(self._config_frame_layout)
         self.tabs.addTab(configs_tab, "Main")
 
         #==========main tab may===================
-        main_tab = QVBoxLayout(self)
+        main_tab = QVBoxLayout(configs_tab)
         main_rows = QHBoxLayout()
         main_rows.setSpacing(5)
         #left frame for Try
@@ -168,7 +168,7 @@ class TomoGUI(QWidget):
         batch_try_layout.addWidget(self.start_scan_input)
         batch_try_layout.addWidget(QLabel("End:"))
         self.end_scan_input = QLineEdit()
-        try_form.addRow("End:",self.end_scan_input)
+        batch_try_layout.addWidget(self.end_scan_input)
         batch_try_btn = QPushButton("Batch Try")
         batch_try_btn.clicked.connect(self.batch_try_reconstruction)
         batch_try_layout.addWidget(batch_try_btn)
