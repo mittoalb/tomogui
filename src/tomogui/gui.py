@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QTextEdit, QLineEdit, QLabel, QProgressBar,
     QComboBox, QSlider, QGroupBox, QSizePolicy, QMessageBox,
     QTabWidget, QFormLayout, QCheckBox, QSpinBox, QDoubleSpinBox,
-    QScrollArea, QToolButton
+    QScrollArea
 )
 from PyQt5.QtCore import Qt, QEvent, QProcess, QEventLoop, QSize
 
@@ -78,6 +78,8 @@ class TomoGUI(QWidget):
         # recon/recon_step + Rotation axis method + input guess COR + config buttons
         cor_layout = QHBoxLayout()
 
+        '''
+        #======================original method=========================
         self.recon_way_box = QComboBox()
         self.recon_way_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.recon_way_box.addItems(["recon","recon_steps"])
@@ -94,7 +96,7 @@ class TomoGUI(QWidget):
         self.cor_input = QLineEdit()
         cor_layout.addWidget(QLabel("COR:"))
         cor_layout.addWidget(self.cor_input)
-
+        '''
         load_config_btn = QPushButton("Load Config")
         save_config_btn = QPushButton("Save Config")
         load_config_btn.clicked.connect(self.load_config)
@@ -127,6 +129,91 @@ class TomoGUI(QWidget):
         configs_v.addLayout(self._config_frame_layout)
         self.tabs.addTab(configs_tab, "Main")
 
+        #==========main tab may===================
+        main_tab = QVBoxLayout(self)
+        main_rows = QHBoxLayout()
+        main_rows.setSpacing(5)
+        #left frame for Try
+        try_box = QGroupBox("Try Reconstruction")
+        try_form = QFormLayout()
+        #left - row 1
+        self.recon_way_box = QComboBox()
+        self.recon_way_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.recon_way_box.addItems(["recon","recon_steps"])
+        self.recon_way_box.setCurrentIndex(0) # make recon as default
+        try_form.addRow("Reconstruction way", self.recon_way_box)
+        #row 2
+        self.cor_method_box = QComboBox()
+        self.cor_method_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.cor_method_box.addItems(["auto","manual"])
+        self.cor_method_box.setCurrentIndex(1) # make manual as default
+        try_form.addRow("COR method",self.cor_method_box)
+        #row 3
+        self.cor_input = QLineEdit()
+        self.cor_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        try_form.addRow("COR", self.cor_input)
+        #row 4: Try, View Try buttons
+        try_btn_layout = QHBoxLayout()
+        try_btn = QPushButton("Try")
+        try_btn.clicked.connect(self.try_reconstruction)
+        view_try_btn = QPushButton("View Try")
+        view_try_btn.clicked.connect(self.view_try_reconstruction)
+        try_btn_layout.addWidget(try_btn)
+        try_btn_layout.addWidget(view_try_btn)
+        try_form.addRow(try_btn_layout)
+        #row 5 - batch try: start, end, batch try btn
+        batch_try_layout = QHBoxLayout()
+        batch_try_layout.addWidget(QLabel("Start:"))
+        self.start_scan_input = QLineEdit()
+        batch_try_layout.addWidget(self.start_scan_input)
+        batch_try_layout.addWidget(QLabel("End:"))
+        self.end_scan_input = QLineEdit()
+        try_form.addRow("End:",self.end_scan_input)
+        batch_try_btn = QPushButton("Batch Try")
+        batch_try_btn.clicked.connect(self.batch_try_reconstruction)
+        batch_try_layout.addWidget(batch_try_btn)
+        try_form.addRow(batch_try_layout)
+
+        try_box.setLayout(try_form)
+
+        #right frame for Full
+        full_box = QGroupBox("Full Reconstruction")
+        full_form = QFormLayout()
+        #right - row 1 recon/recon_step
+        self.recon_way_box_full = QComboBox()
+        self.recon_way_box_full.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.recon_way_box_full.addItems(["recon","recon_steps"])
+        self.recon_way_box_full.setCurrentIndex(0) # make recon as default
+        full_form.addRow("Reconstruction way", self.recon_way_box_full)
+        #right - row 2: COR (Full), add COR btn
+        cor_full_layout = QHBoxLayout()
+        cor_full_layout.addWidget(QLabel("COR (Full):"))
+        self.cor_input_full = QLineEdit()
+        cor_full_layout.addWidget(self.cor_input_full)
+        rec_cor_btn = QPushButton("Add COR")
+        rec_cor_btn.clicked.connect(self.record_cor_to_json)
+        cor_full_layout.addWidget(rec_cor_btn)
+        full_form.addRow(cor_full_layout)
+        #right - row 3: Full, View Full buttons
+        full_btn_layout = QHBoxLayout()
+        full_btn = QPushButton("Full")
+        full_btn.clicked.connect(self.full_reconstruction)
+        self.view_btn = QPushButton("View Full")
+        self.view_btn.setEnabled(True)
+        self.view_btn.clicked.connect(self.view_full_reconstruction)
+        full_btn_layout.addWidget(full_btn)
+        full_btn_layout.addWidget(self.view_btn)
+        full_form.addRow(full_btn_layout)
+        #right - row 4: Batch Full btn
+        batch_full_btn = QPushButton("Batch Full")
+        batch_full_btn.clicked.connect(self.batch_full_reconstruction)
+        full_form.addRow(batch_full_btn)
+
+        full_box.setLayout(full_form)
+        main_rows.addWidget(try_box,1)
+        main_rows.addWidget(full_box,1)
+        main_tab.addLayout(main_rows)
+        '''
         # Try config group
         left_config_group = QGroupBox("Config for Try Reconstruction")
         left_config_layout = QVBoxLayout()
@@ -137,6 +224,8 @@ class TomoGUI(QWidget):
         self.config_editor_try.focusOutEvent = lambda event: self.unhighlight_editor(self.config_editor_try, event)
         left_config_layout.addWidget(self.config_editor_try)
 
+        
+        #==============original======================= left config group (buttons, no box config txt)
         try_btn_layout = QHBoxLayout()
         try_btn = QPushButton("Try")
         try_btn.clicked.connect(self.try_reconstruction)
@@ -159,7 +248,7 @@ class TomoGUI(QWidget):
         scan_range_layout.addWidget(self.end_scan_input)
         left_config_layout.addLayout(scan_range_layout)
         left_config_group.setLayout(left_config_layout)
-
+        
         # Full config group
         right_config_group = QGroupBox("Config for Full Reconstruction")
         right_config_layout = QVBoxLayout()
@@ -171,7 +260,8 @@ class TomoGUI(QWidget):
         right_config_layout.addWidget(self.config_editor_full)
 
         self.active_editor = self.config_editor_try
-
+        #===========original=========right config group (buttons, no box config txt)
+        
         full_btn_layout = QHBoxLayout()
         full_btn = QPushButton("Full")
         full_btn.clicked.connect(self.full_reconstruction)
@@ -202,7 +292,7 @@ class TomoGUI(QWidget):
         # Place groups into "Configs" tab
         self._config_frame_layout.addWidget(left_config_group)
         self._config_frame_layout.addWidget(right_config_group)
-
+        '''
         # Tab 2: Params (all CLI flags + extra args)
         self._build_params_tab()
         self._build_rings_tab()
@@ -1381,7 +1471,7 @@ class TomoGUI(QWidget):
 
     def full_reconstruction(self):
         proj_file = self.proj_file_box.currentData()
-        recon_way = self.recon_way_box.currentText()  # fixed (was currentData)
+        recon_way = self.recon_way_box_full.currentText()  # fixed (was currentData)
         try:
             cor_value = float(self.cor_input_full.text())
         except ValueError:
@@ -1518,7 +1608,7 @@ class TomoGUI(QWidget):
         size = len(data)
         try:
             for i, (proj_file, cor_value) in enumerate(data.items(), start=1):
-                cmd = ["tomocupy", self.recon_way_box.currentText(), 
+                cmd = ["tomocupy", self.recon_way_box_full.currentText(), 
                     "--reconstruction-type", "full", 
                     "--config", temp_full, 
                     "--file-name", proj_file, 
