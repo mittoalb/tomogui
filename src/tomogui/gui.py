@@ -1241,57 +1241,51 @@ class TomoGUI(QWidget):
     def _build_advanced_config_tab(self):
         config_tab = QWidget()
         self.tabs.addTab(config_tab, "Advanced Config")
-        config_main = QVBoxLayout(config_tab)
+        config_main = QVBoxLayout(config_tab) #main layout for the tab
+        config_txt_main = QVBoxLayout() #layout for left/right
         config_rows = QHBoxLayout()
         config_rows.setSpacing(5)
-        #left frame for Try
-        conf_try_box = QGroupBox("Try Recon Config")
-        conf_try_form = QFormLayout()
-        #left - row 1: generate config file button
+        # some common functions for both try/full
+        func_box = QHBoxLayout()
+        self.use_conf_box = QCheckBox("Enable config")
+        self.use_conf_box.setChecked(False)
+        func_box.addWidget(self.use_conf_box)
         ge_conf_btn = QPushButton("Generate config file")
         ge_conf_btn.clicked.connect(self.generate_config) #place holder
-        conf_try_form.addRow(ge_conf_btn)
-        #left - row 2: load and save config file button
-        conf_layout = QHBoxLayout()
+        func_box.addWidget(ge_conf_btn)
         load_config_btn = QPushButton("Load Config")
         save_config_btn = QPushButton("Save Config")
         load_config_btn.clicked.connect(self.load_config)
         save_config_btn.clicked.connect(self.save_config)
-        conf_layout.addWidget(load_config_btn)
-        conf_layout.addWidget(save_config_btn)
-        conf_try_form.addRow(conf_layout)
-        #left - row 3: conf txt box
-        left_config_layout = QVBoxLayout()
+        func_box.addWidget(load_config_btn)
+        func_box.addWidget(save_config_btn)
+        config_main.addLayout(func_box)
+        #left frame for Try
+        left_try_box = QGroupBox("Try Recon Config")
+        #left - row 1: config txt box
+        left_try_layout = QVBoxLayout()
         self.config_editor_try = QTextEdit()
         self.config_editor_try.setFixedHeight(300)
         self.config_editor_try.setStyleSheet("QTextEdit { border: 1px solid gray; font-size: 12.5pt; }")
         self.config_editor_try.focusInEvent = lambda event: self.highlight_editor(self.config_editor_try, event)
         self.config_editor_try.focusOutEvent = lambda event: self.unhighlight_editor(self.config_editor_try, event)
-        left_config_layout.addWidget(self.config_editor_try)
-        conf_try_form.addRow(left_config_layout)
-        conf_try_box.setLayout(conf_try_form)
-
-        conf_full_box = QGroupBox("Full Recon Config")
-        conf_full_form = QFormLayout()
+        left_try_layout.addWidget(self.config_editor_try)
+        left_try_box.setLayout(left_try_layout)
         #right - row 1: conf full txt box
-        spacer = QWidget()
-        spacer.setFixedHeight(5)
-        conf_full_form.addRow(spacer)   # this becomes "row 1" on the right
-        #right - row 2: conf full txt box
-        right_config_layout = QVBoxLayout()
+        right_full_box = QGroupBox("Full Recon Config")
+        right_full_layout = QVBoxLayout()
         self.config_editor_full = QTextEdit()
         self.config_editor_full.setFixedHeight(300)
         self.config_editor_full.setStyleSheet("QTextEdit { border: 1px solid gray; font-size: 12.5pt; }")
         self.config_editor_full.focusInEvent = lambda event: self.highlight_editor(self.config_editor_full, event)
         self.config_editor_full.focusOutEvent = lambda event: self.unhighlight_editor(self.config_editor_full, event)
-        right_config_layout.addWidget(self.config_editor_full)
-        conf_full_form.addRow(right_config_layout)
-        conf_full_box.setLayout(conf_full_form)
+        right_full_layout.addWidget(self.config_editor_full)
+        right_full_box.setLayout(right_full_layout)
 
         self.active_editor = self.config_editor_try
-        config_rows.addWidget(conf_try_box,1)
-        config_rows.addWidget(conf_full_box,1)
-        config_main.addLayout(config_rows)
+        config_txt_main.addWidget(left_try_box,1)
+        config_txt_main.addWidget(right_full_box,1)
+        config_main.addLayout(config_txt_main)
 
     
     # ===== HELPER METHODS =====
@@ -1516,32 +1510,45 @@ class TomoGUI(QWidget):
             except ValueError:
                 self.log_output.append(f"\u274c wrong rotation axis input")
                 return
-        config_text = self.config_editor_try.toPlainText()
-        if not config_text.strip():
-            self.log_output.append("\u26a0\ufe0f not use conf")
-        temp_try = os.path.join(self.data_path.text(), "temp_try.conf")
-        with open(temp_try, "w") as f:
-            f.write(config_text)
-
-        # Base command
-        cmd = ["tomocupy", str(recon_way), 
-               "--reconstruction-type", "try", 
-               "--config", temp_try, 
-               "--file-name", proj_file]
-        if cor_method == "auto":
-            cmd += ["--rotation-axis-auto", "auto"]
+        #add check box for config, seperate from selecting parameters from GUI
+        if self.use_conf_box.isChecked():
+            self.log_output.append("\u26a0\ufe0f You are using config file, only recon type, filename, rot axis from GUI")
+            config_text = self.config_editor_try.toPlainText()
+            if not config_text.strip():
+                self.log_output.append("\u26a0\ufe0f not use conf")
+            temp_try = os.path.join(self.data_path.text(), "temp_try.conf")
+            with open(temp_try, "w") as f:
+                f.write(config_text)
+            # Base command
+            cmd = ["tomocupy", str(recon_way), 
+                "--reconstruction-type", "try", 
+                "--config", temp_try, 
+                "--file-name", proj_file]
+            if cor_method == "auto":
+                cmd += ["--rotation-axis-auto", "auto"]
+            else:
+                cmd += ["--rotation-axis-auto", "manual",
+                        "--rotation-axis", str(cor)]
         else:
-            cmd += ["--rotation-axis-auto", "manual",
-                    "--rotation-axis", str(cor)]
+            self.log_output.append("\u26a0\ufe0f You are using params from GUI")
+            # Base command
+            cmd = ["tomocupy", str(recon_way), 
+                "--reconstruction-type", "try", 
+                "--file-name", proj_file]
+            if cor_method == "auto":
+                cmd += ["--rotation-axis-auto", "auto"]
+            else:
+                cmd += ["--rotation-axis-auto", "manual",
+                        "--rotation-axis", str(cor)]
 
-        # Append tabs selections
-        cmd += self._gather_params_args()
-        cmd += self._gather_rings_args()
-        cmd += self._gather_bhard_args()
-        cmd += self._gather_phase_args()
-        cmd += self._gather_Geometry_args()
-        cmd += self._gather_Data_args()                        
-        cmd += self._gather_Performance_args()
+            # Append tabs selections
+            cmd += self._gather_params_args()
+            cmd += self._gather_rings_args()
+            cmd += self._gather_bhard_args()
+            cmd += self._gather_phase_args()
+            cmd += self._gather_Geometry_args()
+            cmd += self._gather_Data_args()                        
+            cmd += self._gather_Performance_args()
                                 
         code = self.run_command_live(cmd, proj_file=proj_file, job_label="Try recon", wait=True)
         try:
@@ -1565,25 +1572,36 @@ class TomoGUI(QWidget):
         except ValueError:
             self.log_output.append("\u274c[ERROR] Invalid Full COR value.")
             return
-        config_text = self.config_editor_full.toPlainText()
-        if not config_text.strip():
-            self.log_output.append("\u26a0\ufe0f not use conf.")
-        temp_full = os.path.join(self.data_path.text(), "temp_full.conf")
-        with open(temp_full, "w") as f:
-            f.write(config_text)
-        cmd = ["tomocupy", str(recon_way),
+        if self.use_conf_box.isChecked():
+            self.log_output.append("\u26a0\ufe0f You are using config file, only recon type, filename, rot axis from GUI")
+            config_text = self.config_editor_full.toPlainText()
+            if not config_text.strip():
+                self.log_output.append("\u26a0\ufe0f not use conf.")
+            temp_full = os.path.join(self.data_path.text(), "temp_full.conf")
+            with open(temp_full, "w") as f:
+                f.write(config_text)
+            # Base command
+            cmd = ["tomocupy", str(recon_way),
+             "--reconstruction-type", "full",
+             "--config", temp_full, 
+             "--file-name", proj_file, 
+             "--rotation-axis", str(cor_value)]    
+        else:
+            self.log_output.append("\u26a0\ufe0f You are using params from GUI")
+            # Base command
+            cmd = ["tomocupy", str(recon_way),
                "--reconstruction-type", "full",
                "--config", temp_full, 
                "--file-name", proj_file, 
                "--rotation-axis", str(cor_value)]
-        # Append tabs selections
-        cmd += self._gather_params_args()
-        cmd += self._gather_rings_args()
-        cmd += self._gather_bhard_args()
-        cmd += self._gather_phase_args()
-        cmd += self._gather_Geometry_args()        
-        cmd += self._gather_Data_args()                
-        cmd += self._gather_Performance_args()
+            # Append tabs selections
+            cmd += self._gather_params_args()
+            cmd += self._gather_rings_args()
+            cmd += self._gather_bhard_args()
+            cmd += self._gather_phase_args()
+            cmd += self._gather_Geometry_args()        
+            cmd += self._gather_Data_args()                
+            cmd += self._gather_Performance_args()
                                 
         code = self.run_command_live(cmd, proj_file=proj_file, job_label="Full recon", wait=True)
         try:
@@ -1627,12 +1645,21 @@ class TomoGUI(QWidget):
             except ValueError:
                 self.log_output.append(f"\u274c wrong rotation axis input")
                 return
-        config_text = self.config_editor_try.toPlainText()
-        if not config_text.strip():
-            self.log_output.append("\u26a0\ufe0f not use conf.")
-        temp_try = os.path.join(folder, "temp_batch_try.conf")
-        with open(temp_try, "w") as f:
-            f.write(config_text)
+        if self.use_conf_box.isChecked():
+            self.log_output.append("\u26a0\ufe0f You are using config file, only recon type, filename, rot axis from GUI")
+            config_text = self.config_editor_try.toPlainText()
+            if not config_text.strip():
+                self.log_output.append("\u26a0\ufe0f not use conf.")
+            temp_try = os.path.join(folder, "temp_batch_try.conf")
+            with open(temp_try, "w") as f:
+                f.write(config_text)
+            cmd = ["tomocupy", str(recon_way), 
+                    "--reconstruction-type", "try", 
+                    "--config", temp_try]      
+        else:      
+            self.log_output.append("\u26a0\ufe0f You are using params from GUI")
+            cmd = ["tomocupy", str(recon_way), 
+                    "--reconstruction-type", "try"]        
         summary = {"done": [], "fail": [], 'no_file': []}
         try:
             for i, scan_num in enumerate(range(start_num, end_num + 1), start=1):
@@ -1643,23 +1670,21 @@ class TomoGUI(QWidget):
                     summary['no_file'].append(scan_str)
                     continue
                 proj_file = match_files[0]
-                cmd = ["tomocupy", str(recon_way), 
-                       "--reconstruction-type", "try", 
-                       "--config", temp_try, 
-                       "--file-name", proj_file]
+                cmd += ["--file-name", proj_file]
                 if cor_method == "auto":
                     cmd += ["--rotation-axis-auto", "auto"]
                 else:
                     cmd += ["--rotation-axis-auto", "manual",
                             "--rotation-axis", str(cor)]
-                # Append Params
-                cmd += self._gather_params_args()
-                cmd += self._gather_rings_args()
-                cmd += self._gather_bhard_args()
-                cmd += self._gather_phase_args()
-                cmd += self._gather_Geometry_args()      
-                cmd += self._gather_Data_args()                                          
-                cmd += self._gather_Performance_args()
+                if self.use_conf_box.isChecked() is False:
+                    # Append Params
+                    cmd += self._gather_params_args()
+                    cmd += self._gather_rings_args()
+                    cmd += self._gather_bhard_args()
+                    cmd += self._gather_phase_args()
+                    cmd += self._gather_Geometry_args()      
+                    cmd += self._gather_Data_args()                                          
+                    cmd += self._gather_Performance_args()
                                 
                 code = self.run_command_live(cmd, proj_file=proj_file, job_label=f'batch try {i}/{total}', wait=True)
                 if code == 0:
@@ -1686,21 +1711,27 @@ class TomoGUI(QWidget):
             return
         with open(log_file) as f:
             data = json.load(f)
-        config_text = self.config_editor_full.toPlainText()
-        if not config_text.strip():
-            self.log_output.append("\u26a0\ufe0f not use conf.")
-        temp_full = os.path.join(self.data_path.text(), "temp_full.conf")
-        with open(temp_full, "w") as f:
-            f.write(config_text)
+        if self.use_conf_box.isChecked():
+            self.log_output.append("\u26a0\ufe0f You are using config file, recon type is from GUI")
+            config_text = self.config_editor_full.toPlainText()
+            if not config_text.strip():
+                self.log_output.append("\u26a0\ufe0f not use conf.")
+            temp_full = os.path.join(self.data_path.text(), "temp_full.conf")
+            with open(temp_full, "w") as f:
+                f.write(config_text)
+            cmd = ["tomocupy", self.recon_way_box_full.currentText(), 
+                "--reconstruction-type", "full", 
+                "--config", temp_full]
+        else:
+            self.log_output.append("\u26a0\ufe0f You are using params from GUI")
+            cmd = ["tomocupy", self.recon_way_box_full.currentText(), 
+                "--reconstruction-type", "full"]
         summary = {"done": [], "fail": []}
         size = len(data)
         try:
             for i, (proj_file, cor_value) in enumerate(data.items(), start=1):
-                cmd = ["tomocupy", self.recon_way_box_full.currentText(), 
-                    "--reconstruction-type", "full", 
-                    "--config", temp_full, 
-                    "--file-name", proj_file, 
-                    "--rotation-axis", str(cor_value)]
+                cmd += ["--file-name", proj_file]
+                cmd += ["--rotation-axis", str(cor_value)]
                 # Append Params
                 cmd += self._gather_params_args()
                 cmd += self._gather_rings_args()
