@@ -1588,11 +1588,10 @@ class TomoGUI(QWidget):
              "--file-name", proj_file, 
              "--rotation-axis", str(cor_value)]    
         else:
-            self.log_output.append("\u26a0\ufe0f You are using params from GUI")
+            self.log_output.append('<span style="color:#e53935;">\u26a0\ufe0f You are using params from GUI</span>')
             # Base command
             cmd = ["tomocupy", str(recon_way),
                "--reconstruction-type", "full",
-               "--config", temp_full, 
                "--file-name", proj_file, 
                "--rotation-axis", str(cor_value)]
             # Append tabs selections
