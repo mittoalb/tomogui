@@ -2049,13 +2049,13 @@ class TomoGUI(QWidget):
         if vis.size < 64:
             vis = a
 
-        lo, hi = np.nanpercentile(vis, [1.05, 99.5])
+        lo, hi = np.nanpercentile(vis, [1.5, 99.5])
         if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
             lo, hi = float(np.nanmin(vis)), float(np.nanmax(vis))
             if lo >= hi:
                 hi = lo + 1.0
 
-        new_vmin, new_vmax = float(round(lo, 3)), float(round(hi, 3))
+        new_vmin, new_vmax = float(round(lo, 5)), float(round(hi, 5))
         if (new_vmin, new_vmax) == (self.vmin, self.vmax):
             self.log_output.append("Auto B&C optimal.")
             return
@@ -2078,7 +2078,7 @@ class TomoGUI(QWidget):
                 self._current_img = self._safe_open_prj(self._current_img_path)
             else:
                 self._current_img = self._safe_open_image(self._current_img_path)
-            self.vmin, self.vmax = round(1.05*self._current_img.min(), 5), round(0.95*self._current_img.max(), 5)
+            self.vmin, self.vmax = round(self._current_img.min(), 5), round(self._current_img.max(), 5)
             self.min_input.setText(str(self.vmin))
             self.max_input.setText(str(self.vmax))
             self.refresh_current_image()
