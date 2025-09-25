@@ -177,21 +177,29 @@ class TomoGUI(QWidget):
         others = QGroupBox("Others")
         others_form = QFormLayout()
 
-        others_layout = QHBoxLayout()
+        others_layout_1 = QHBoxLayout()
         view_prj_btn = QPushButton("View raw")
         view_prj_btn.clicked.connect(self.view_raw)
         help_tomo_btn = QPushButton("help")
         help_tomo_btn.clicked.connect(self.help_tomo)
+        help_tomo_btn.setStyleSheet("color: green;")
         abort_btn = QPushButton("Abort")
         abort_btn.clicked.connect(self.abort_process)
         abort_btn.setStyleSheet("color: red;")
-        others_layout.addWidget(view_prj_btn)
-        others_layout.addWidget(help_tomo_btn)
-        others_layout.addWidget(abort_btn)
-        others_form.addRow(others_layout)
+        others_layout_1.addWidget(view_prj_btn)
+        others_layout_1.addWidget(help_tomo_btn)
+        others_layout_1.addWidget(abort_btn)
+        others_form.addRow(others_layout_1)
+        #left - row 7: more function
+        others_layout_2 = QHBoxLayout()
+        clear_log_btn = QPushButton("Clear Log")
+        clear_log_btn.setEnabled(False) #disable for now
+        clear_log_btn.clicked.connect(self.clear_log)
+        others_layout_2.addWidget(clear_log_btn)
+        others_form.addRow(others_layout_2)
+        
         others.setLayout(others_form)
         try_form.addRow(others)
-        
         try_box.setLayout(try_form)
 
         #right frame for Full
@@ -1252,6 +1260,7 @@ class TomoGUI(QWidget):
         func_box.addWidget(self.use_conf_box)
         ge_conf_btn = QPushButton("Generate config file")
         ge_conf_btn.clicked.connect(self.generate_config) #place holder
+        ge_conf_btn.setEnabled(False) #disable for now
         func_box.addWidget(ge_conf_btn)
         load_config_btn = QPushButton("Load Config")
         save_config_btn = QPushButton("Save Config")
@@ -1415,10 +1424,12 @@ class TomoGUI(QWidget):
     
     def generate_config(self):
         pass #place holder for future use
+    def clear_log(self):
+        pass #place holder for future use
 
     def abort_process(self):
         if not self.process:
-            self.log_output.append("\u2139\ufe0f[INFO] No running process.")
+            self.log_output.append('<span style="color:red;">\u2139\ufe0f No running process.</span>')
             return
 
         for p, name in list(self.process):
@@ -1430,7 +1441,7 @@ class TomoGUI(QWidget):
                 if not p.waitForFinished(2000):
                     p.kill()
                     p.waitForFinished(2000)
-            self.log_output.append(f"\u26d4 [{name}] aborted.")
+            self.log_output.append(f'<span style="color:red;">\u26d4 [{name}] aborted.</span>')
 
         self.process.clear()
 
@@ -1448,7 +1459,7 @@ class TomoGUI(QWidget):
         name = f"{job_label}-{scan_id}" if scan_id else job_label
 
         cli_str = " ".join(map(str, cmd))
-        self.log_output.append(f"\U0001f680 [{name}] start: {cli_str}")
+        self.log_output.append(f'<span style="color:green;">\U0001f680 [{name}] start: {cli_str}</span>')
         QApplication.processEvents()
 
         p = QProcess(self)
@@ -1463,7 +1474,7 @@ class TomoGUI(QWidget):
             except Exception:
                 pass
             if code != 0:
-                self.log_output.append(f"\u274c [{name}] failed with code {code}.")
+                self.log_output.append(f'<span style="color:red;">\u274c [{name}] failed, check terminal</span>')
             result["code"] = code
             if loop is not None:
                 loop.quit()
@@ -1473,7 +1484,7 @@ class TomoGUI(QWidget):
                 result["code"] = -1
             if loop is not None:
                 loop.quit()
-            self.log_output.append(f"\u274c [{name}] {p.errorString()}")
+            self.log_output.append(f'<span style="color:red;">\u274c [{name}] {p.errorString()}</span>')
 
         p.finished.connect(on_finished)
         p.errorOccurred.connect(on_error)
@@ -1502,20 +1513,21 @@ class TomoGUI(QWidget):
         cor_val = self.cor_input.text().strip()
         if cor_method == "auto":
             if cor_val:
-                self.log_output.append(f"\u274c no manual cor for auto method")
+                self.log_output.append(f'<span style="color:red;">\u274c no manual cor for auto method</span>')
                 return
         else:
             try:
                 cor = float(cor_val)
             except ValueError:
-                self.log_output.append(f"\u274c wrong rotation axis input")
+                self.log_output.append(f'<span style="color:red;">\u274c wrong rotation axis input</span>')
                 return
         #add check box for config, seperate from selecting parameters from GUI
         if self.use_conf_box.isChecked():
             self.log_output.append("\u26a0\ufe0f You are using config file, only recon type, filename, rot axis from GUI")
             config_text = self.config_editor_try.toPlainText()
             if not config_text.strip():
-                self.log_output.append("\u26a0\ufe0f not use conf")
+                self.log_output.append(f'<span style="color:red;">\u26a0\ufe0f no text in conf, stop</span>')
+                return
             temp_try = os.path.join(self.data_path.text(), "temp_try.conf")
             with open(temp_try, "w") as f:
                 f.write(config_text)
@@ -1530,7 +1542,7 @@ class TomoGUI(QWidget):
                 cmd += ["--rotation-axis-auto", "manual",
                         "--rotation-axis", str(cor)]
         else:
-            self.log_output.append("\u26a0\ufe0f You are using params from GUI")
+            self.log_output.append('\u26a0\ufe0f You are using params from GUI')
             # Base command
             cmd = ["tomocupy", str(recon_way), 
                 "--reconstruction-type", "try", 
@@ -1553,9 +1565,9 @@ class TomoGUI(QWidget):
         code = self.run_command_live(cmd, proj_file=proj_file, job_label="Try recon", wait=True)
         try:
             if code == 0:
-                self.log_output.append(f"\u2705 Done try recon {proj_file}")
+                self.log_output.append(f'<span style="color:green;">\u2705 Done try recon {proj_file}</span>')
             else:
-                self.log_output.append(f"\u274c Try recon {proj_file} failed.")
+                self.log_output.append(f'<span style="color:red;">\u274c Try recon {proj_file} failed</span>')
         finally:
             if self.use_conf_box.isChecked():
                 try:
@@ -1563,7 +1575,7 @@ class TomoGUI(QWidget):
                         os.remove(temp_try)
                         self.log_output.append(f"\U0001f9f9 Removed {temp_try}")
                 except Exception as e:
-                    self.log_output.append(f"\u26a0\ufe0f Could not remove {temp_try}: {e}")
+                    self.log_output.append(f'<span style="color:red;">\u26a0\ufe0f Could not remove {temp_try}: {e}</span>')
 
     def full_reconstruction(self):
         proj_file = self.proj_file_box.currentData()
@@ -1571,13 +1583,14 @@ class TomoGUI(QWidget):
         try:
             cor_value = float(self.cor_input_full.text())
         except ValueError:
-            self.log_output.append("\u274c[ERROR] Invalid Full COR value.")
+            self.log_output.append(f'<span style="color:red;">\u274c[ERROR] Invalid Full COR value</span>')
             return
         if self.use_conf_box.isChecked():
             self.log_output.append("\u26a0\ufe0f You are using config file, only recon type, filename, rot axis from GUI")
             config_text = self.config_editor_full.toPlainText()
             if not config_text.strip():
-                self.log_output.append("\u26a0\ufe0f not use conf.")
+                self.log_output.append(f'<span style="color:red;">\u26a0\ufe0f No text in conf, stop</span>')
+                return
             temp_full = os.path.join(self.data_path.text(), "temp_full.conf")
             with open(temp_full, "w") as f:
                 f.write(config_text)
@@ -1588,7 +1601,7 @@ class TomoGUI(QWidget):
              "--file-name", proj_file, 
              "--rotation-axis", str(cor_value)]    
         else:
-            self.log_output.append('<span style="color:#e53935;">\u26a0\ufe0f You are using params from GUI</span>')
+            self.log_output.append('\u26a0\ufe0f You are using params from GUI')
             # Base command
             cmd = ["tomocupy", str(recon_way),
                "--reconstruction-type", "full",
@@ -1606,9 +1619,9 @@ class TomoGUI(QWidget):
         code = self.run_command_live(cmd, proj_file=proj_file, job_label="Full recon", wait=True)
         try:
             if code == 0:
-                self.log_output.append(f"\u2705 Done full recon {proj_file}")
+                self.log_output.append(f'<span style="color:green;">\u2705 Done full recon {proj_file}</span>')
             else:
-                self.log_output.append(f"\u274c Full recon {proj_file} failed.")
+                self.log_output.append(f'<span style="color:red;">\u274c Full recon {proj_file} failed</span>')
         finally:
             if self.use_conf_box.isChecked():
                 try:
@@ -1616,7 +1629,7 @@ class TomoGUI(QWidget):
                         os.remove(temp_full)
                         self.log_output.append(f"\U0001f9f9 Removed {temp_full}")
                 except Exception as e:
-                    self.log_output.append(f"\u26a0\ufe0f Could not remove {temp_full}: {e}")
+                    self.log_output.append(f'<span style="color:red;">\u26a0\ufe0f Could not remove {temp_full}: {e}</span>')
         self.view_btn.setEnabled(True)
 
     def batch_try_reconstruction(self):
@@ -1625,12 +1638,12 @@ class TomoGUI(QWidget):
             end_num = int(self.end_scan_input.text())
             total = end_num - start_num + 1
         except ValueError:
-            self.log_output.append("\u274c[ERROR] Invalid start or end scan number.")
+            self.log_output.append(f'<span style="color:red;">\u274c[ERROR] Invalid start or end scan number</span>')
             return
 
         folder = self.data_path.text()
         if not os.path.isdir(folder):
-            self.log_output.append("\u274c[ERROR] Invalid data folder.")
+            self.log_output.append(f'<span style="color:red;">\u274c[ERROR] Invalid data folder</span>')
             return
         recon_way = self.recon_way_box.currentText()
         cor_method = self.cor_method_box.currentText()  # fixed (was currenText)
@@ -1638,19 +1651,20 @@ class TomoGUI(QWidget):
         cor = None
         if cor_method == 'auto':
             if cor_val:
-                self.log_output.append(f"\u274c no manual cor for auto method")
+                self.log_output.append(f'<span style="color:red;">\u274c no manual cor for auto method</span>')
                 return
         else:
             try:
                 cor = float(cor_val)
             except ValueError:
-                self.log_output.append(f"\u274c wrong rotation axis input")
+                self.log_output.append(f'<span style="color:red;">\u274c wrong rotation axis input</span>')
                 return
         if self.use_conf_box.isChecked():
-            self.log_output.append("\u26a0\ufe0f You are using config file, only recon type, filename, rot axis from GUI")
+            self.log_output.append('\u26a0\ufe0f You are using config file, only recon type, filename, rot axis from GUI')
             config_text = self.config_editor_try.toPlainText()
             if not config_text.strip():
-                self.log_output.append("\u26a0\ufe0f not use conf.")
+                self.log_output.append(f'<span style="color:red;">\u26a0\ufe0f No text in conf, stop</span>')
+                return
             temp_try = os.path.join(folder, "temp_batch_try.conf")
             with open(temp_try, "w") as f:
                 f.write(config_text)
@@ -1658,7 +1672,7 @@ class TomoGUI(QWidget):
                     "--reconstruction-type", "try", 
                     "--config", temp_try]      
         else:      
-            self.log_output.append("\u26a0\ufe0f You are using params from GUI")
+            self.log_output.append('\u26a0\ufe0f You are using params from GUI')
             cmd = ["tomocupy", str(recon_way), 
                     "--reconstruction-type", "try"]        
         summary = {"done": [], "fail": [], 'no_file': []}
@@ -1667,7 +1681,7 @@ class TomoGUI(QWidget):
                 scan_str = f"{scan_num:04d}"
                 match_files = glob.glob(os.path.join(folder, f"*{scan_str}.h5"))
                 if not match_files:
-                    self.log_output.append(f"\u26a0\ufe0f[WARN] No file found for scan {scan_str}, skipping.")
+                    self.log_output.append(f'<span style="color:#fb8c00;">[WARN] No file found for scan {scan_str}, skipping</span>')
                     summary['no_file'].append(scan_str)
                     continue
                 proj_file = match_files[0]
@@ -1689,10 +1703,10 @@ class TomoGUI(QWidget):
                                 
                 code = self.run_command_live(cmd, proj_file=proj_file, job_label=f'batch try {i}/{total}', wait=True)
                 if code == 0:
-                    self.log_output.append(f"\u2705 Done try recon {proj_file}")
+                    self.log_output.append(f'<span style="color:green;">\u2705 Done try recon {proj_file}</span>')
                     summary['done'].append(scan_str)
                 else:
-                    self.log_output.append(f"\u274c Try recon {proj_file} failed.")
+                    self.log_output.append(f'<span style="color:red;">\u274c Try recon {proj_file} failed</span>')
                     summary['fail'].append(scan_str)
         finally:
             if self.use_conf_box.isChecked():
@@ -1701,7 +1715,7 @@ class TomoGUI(QWidget):
                         os.remove(temp_try)
                         self.log_output.append(f"\U0001f9f9 Removed {temp_try}")
                 except Exception as e:
-                    self.log_output.append(f"\u26a0\ufe0f Could not remove {temp_try}: {e}")
+                    self.log_output.append(f'<span style="color:red;">\u26a0\ufe0f Could not remove {temp_try}: {e}</span>')
             self.log_output.append(f"\u2705Done batch try, check summary: {str(summary)}")
 
     def batch_full_reconstruction(self):
@@ -1709,15 +1723,16 @@ class TomoGUI(QWidget):
             batch recon and delete cor_log.json and temp_full.conf after batch"""
         log_file = os.path.join(self.data_path.text(), "rot_cen.json")
         if not os.path.exists(log_file):
-            self.log_output.append("\u274c[ERROR] rot_cen.json not found.")
+            self.log_output.append(f'<span style="color:red;">\u274c[ERROR] rot_cen.json not found</span>')
             return
         with open(log_file) as f:
             data = json.load(f)
         if self.use_conf_box.isChecked():
-            self.log_output.append("\u26a0\ufe0f You are using config file, recon type is from GUI")
+            self.log_output.append(f"\u26a0\ufe0f You are using conf file, recon way is from GUI")
             config_text = self.config_editor_full.toPlainText()
             if not config_text.strip():
-                self.log_output.append("\u26a0\ufe0f not use conf.")
+                self.log_output.append(f'<span style="color:red;">\u26a0\ufe0f no text in conf, stop</span>')
+                return
             temp_full = os.path.join(self.data_path.text(), "temp_full.conf")
             with open(temp_full, "w") as f:
                 f.write(config_text)
@@ -1745,10 +1760,10 @@ class TomoGUI(QWidget):
                                                         	
                 code = self.run_command_live(cmd, proj_file=proj_file, job_label=f"batch full {i}/{size}", wait=True)
                 if code == 0:
-                    self.log_output.append(f"\u2705 Done full recon {proj_file}")
+                    self.log_output.append(f'<span style="color:green;">\u2705 Done full recon {proj_file}</span>')
                     summary['done'].append(f"{os.path.basename(proj_file)}")
                 else:
-                    self.log_output.append(f"\u274c full recon {proj_file} failed")
+                    self.log_output.append(f'<span style="color:red;">\u274c full recon {proj_file} failed</span>')
                     summary['fail'].append(f"{os.path.basename(proj_file)}")                
         finally:
             if self.use_conf_box.isChecked():
@@ -1757,7 +1772,7 @@ class TomoGUI(QWidget):
                         os.remove(temp_full)
                         self.log_output.append(f"\U0001f9f9 Removed {temp_full}")
                 except Exception as e:
-                    self.log_output.append(f"\u26a0\ufe0f Could not remove {temp_full}: {e}")
+                    self.log_output.append(f'<span style="color:red;">\u26a0\ufe0f Could not remove {temp_full}: {e}</span>')
             self.log_output.append(f"\u2705Done batch full, check summary: {str(summary)}")
 
     # ===== COR MANAGEMENT =====
@@ -1767,13 +1782,13 @@ class TomoGUI(QWidget):
         proj_file = self.proj_file_box.currentData()
 
         if not (data_folder and cor_value and proj_file):
-            self.log_output.append("\u26a0\ufe0f[WARNING] Missing data folder, COR, or projection file.")
+            self.log_output.append(f'<span style="color:red;">\u26a0\ufe0fMissing data folder, COR, or projection file</span>')
             return
 
         try:
             cor_value = float(cor_value)
         except ValueError:
-            self.log_output.append("\u274c[ERROR] COR value is not a valid number.")
+            self.log_output.append(f'<span style="color:red;">\u274c[ERROR] COR value is not a valid number</span>')
             return
 
         json_path = os.path.join(data_folder, "rot_cen.json")
@@ -1807,7 +1822,7 @@ class TomoGUI(QWidget):
                 json.dump(self.cor_data, f, indent=2)
             self.log_output.append(f"\u2705[INFO] COR saved for: {proj_file}")
         except Exception as e:
-            self.log_output.append(f"\u274c[ERROR] Failed to save rot_cen.json: {e}")
+            self.log_output.append(f'<span style="color:red;">\u274cFailed to save rot_cen.json: {e}</span>')
             return
 
         self.cor_json_output.clear()
@@ -1848,7 +1863,7 @@ class TomoGUI(QWidget):
         try:
             self._raw_h5 = h5py.File(raw_fn, "r")
         except Exception as e:
-            self.log_output.append(f"\u274c Failed to open H5: {e}")
+            self.log_output.append(f'<span style="color:red;">\u274c Failed to open H5: {e}</span>')
             return
         self.raw_files_num = self._raw_h5['/exchange/data'].shape[0] # number of projections
         # safe mean to float to avoid uint overflows
@@ -1874,7 +1889,7 @@ class TomoGUI(QWidget):
         try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
         self.preview_files = sorted(glob.glob(os.path.join(try_dir, "*.tiff")))
         if not self.preview_files:
-            self.log_output.append(f"\u274cNo try folder")
+            self.log_output.append(f'<span style="color:red;">\u274cNo try folder</span>')
             return
         self._keep_zoom = False
         self._clear_roi()
@@ -1896,7 +1911,7 @@ class TomoGUI(QWidget):
 
         self.full_files = sorted(glob.glob(os.path.join(full_dir, "*.tiff")))
         if not self.full_files:
-            self.log_output.append("\u26a0\ufe0f No full reconstruction images found.")
+            self.log_output.append(f'<span style="color:red;">\u26a0\ufe0f No full reconstruction images found</span>')
             return
         self._keep_zoom = False
         self._clear_roi()
@@ -1991,7 +2006,7 @@ class TomoGUI(QWidget):
             pass
         self.roi_extent = None
         self.canvas.draw_idle()
-        self.log_output.append("ROI cleared.")
+        self.log_output.append(f'<span style="color:green;">ROI cleared</span>')
 
     def _on_mouse_move(self, event):
         # show x,y and pixel value when mouse on image
@@ -2056,7 +2071,7 @@ class TomoGUI(QWidget):
 
         new_vmin, new_vmax = float(round(lo, 5)), float(round(hi, 5))
         if (new_vmin, new_vmax) == (self.vmin, self.vmax):
-            self.log_output.append("Auto B&C optimal.")
+            self.log_output.append("Auto B&C optimal")
             return
 
         self.vmin, self.vmax = new_vmin, new_vmax
@@ -2290,7 +2305,7 @@ class TomoGUI(QWidget):
         vmax = self.max_input.text().strip()
         
         if not data_folder:
-            self.log_output.append("\u274c[ERROR] Data folder not set.")
+            self.log_output.append(f'<span style="color:red;">\u274c[ERROR] Data folder not set</span>')
             return
         
         flist = []
@@ -2299,7 +2314,7 @@ class TomoGUI(QWidget):
             filename = os.path.join(data_folder, f"{fn}")
             flist.append(filename)
             if not filename:
-                self.log_output.append("\u274c[ERROR] Filename not exist.")
+                self.log_output.append(f'<span style="color:red;">\u274c[ERROR] Filename not exist</span>')
                 return
         else:
             numbers = set()
@@ -2310,18 +2325,18 @@ class TomoGUI(QWidget):
                         start, end = map(int, sn.split("-"))
                         numbers.update(range(start, end+1))
                     except ValueError:
-                        self.log_output.append("\u274c[ERROR] Invalid range: {sn}")
+                        self.log_output.append(f'<span style="color:red;">\u274c[ERROR] Invalid range: {sn}</span>')
                 else:
                     try:
                         numbers.add(int(sn))
                     except ValueError:
-                        self.log_output.append("\u274c[ERROR] Invalid scan number: {sn}")
+                        self.log_output.append(f'<span style="color:red;">\u274c[ERROR] Invalid scan number: {sn}</span>')
             for n in numbers:
                 fn = os.path.join(data_folder, f"*{n:04d}.h5")
                 try:
                     filename = glob.glob(fn)[0]
                 except IndexError:
-                    self.log_output.append(f"Scan {n:04d} not exist, stop")
+                    self.log_output.append(f'<span style="color:red;">Scan {n:04d} not exist, stop</span>')
                     break
                 flist.append(filename)
         
@@ -2349,9 +2364,9 @@ class TomoGUI(QWidget):
             QApplication.processEvents()
             code = self.run_command_live(cmd, proj_file=input_fn, job_label="tomolog", wait=True)
             if code == 0:
-                self.log_output.append(f"\u2705 Done tomolog {input_fn}")
+                self.log_output.append(f'<span style="color:green;">\u2705 Done tomolog {input_fn}</span>')
             else:
-                self.log_output.append(f"\u274c Tomolog {input_fn} failed.")
+                self.log_output.append(f'<span style="color:red;">\u274c Tomolog {input_fn} failed</span>')
 
 
 if __name__ == "__main__":
