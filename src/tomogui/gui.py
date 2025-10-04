@@ -853,7 +853,10 @@ class TomoGUI(QWidget):
             elif kind == "spin":
                 args += [flag, str(w.value())]
             elif kind == "dspin":
-                args += [flag, str(w.value())]
+                if w.value() == None:
+                    continue
+                else:
+                    args += [flag, str(w.value())]
 
         return args        
 
