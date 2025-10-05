@@ -655,7 +655,7 @@ class TomoGUI(QWidget):
 
         add_combo("--minus-log", ["True","False"], default="True", include=False) #always include
 
-        add_line("--nsino", "0.5 or [0,0.9]", default=0.5, include=False) #always include
+        add_line("--nsino", "0.5 or [0,0.9]", include=False) #always include
 
 #        add_dspin("--rotation-axis", -1e9, 1e9, step=0.01, default=-1.0)
 #        add_combo("--rotation-axis-auto", ["manual","auto"], default="manual")
