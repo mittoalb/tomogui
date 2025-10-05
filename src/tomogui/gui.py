@@ -658,6 +658,49 @@ class TomoGUI(QWidget):
         outer.addWidget(scroll)
 
         self.bhard_widgets = {}
+        #add check box before each line
+        def _add_row(flag, kind, w, default=None, label_text=None):
+            label_text = label_text or flag
+            include_cb = QCheckBox()
+            include_cb.setChecked(False)
+
+            # label cell = [ include_cb | "flag" ]
+            label_widget = QWidget()
+            h = QHBoxLayout(label_widget)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(6)
+            h.addWidget(include_cb)
+            lbl = QLabel(label_text)
+            h.addWidget(lbl)
+            h.addStretch(1)
+
+            # start disabled/grey
+            lbl.setEnabled(False)
+            w.setEnabled(False)
+
+            def on_toggle(checked):
+                lbl.setEnabled(checked)
+                w.setEnabled(checked)
+                if not checked:
+                    # reset to a sensible "off" state
+                    if kind in ("spin", "dspin") and default is not None:
+                        w.blockSignals(True)
+                        w.setValue(default)
+                        w.blockSignals(False)
+                    elif kind == "combo":
+                        if default is not None:
+                            w.setCurrentText(str(default))
+                        else:
+                            w.setCurrentIndex(0)
+                    elif kind == "line":
+                        w.clear()
+                    elif kind == "check":
+                        w.setChecked(False)
+
+            include_cb.toggled.connect(on_toggle)
+            form.addRow(label_widget, w)
+
+            self.bhard_widgets[flag] = (kind, w, include_cb, default)         
 
         def add_line(flag, placeholder="", tip="", width=240):
             w = QLineEdit()
@@ -666,8 +709,7 @@ class TomoGUI(QWidget):
             if tip:
                 w.setToolTip(tip)
             w.setFixedWidth(width)
-            self.bhard_widgets[flag] = ("line", w)
-            form.addRow(QLabel(flag), w)
+            _add_row(flag, "line", w, default="")
 
         def add_combo(flag, items, default=None, tip=""):
             w = QComboBox()
@@ -676,15 +718,13 @@ class TomoGUI(QWidget):
                 w.setCurrentText(default)
             if tip:
                 w.setToolTip(tip)
-            self.bhard_widgets[flag] = ("combo", w)
-            form.addRow(QLabel(flag), w)
+            _add_row(flag, "combo", w, default=default)
 
         def add_check(flag, tip=""):
             w = QCheckBox()
             if tip:
                 w.setToolTip(tip)
-            self.bhard_widgets[flag] = ("check", w)
-            form.addRow(QLabel(flag), w)
+            _add_row(flag, "check", w, default=False)
 
         def add_spin(flag, minv, maxv, step=1, default=None, tip=""):
             w = QSpinBox()
@@ -694,8 +734,7 @@ class TomoGUI(QWidget):
                 w.setValue(default)
             if tip:
                 w.setToolTip(tip)
-            self.bhard_widgets[flag] = ("spin", w)
-            form.addRow(QLabel(flag), w)
+            _add_row(flag, "spin", w, default=default)
 
         def add_dspin(flag, minv, maxv, step=0.1, default=None, tip=""):
             w = QDoubleSpinBox()
@@ -706,8 +745,7 @@ class TomoGUI(QWidget):
                 w.setValue(default)
             if tip:
                 w.setToolTip(tip)
-            self.bhard_widgets[flag] = ("dspin", w)
-            form.addRow(QLabel(flag), w)
+            _add_row(flag, "dspin", w, default=default)
 
         # Beam hardening / source & scintillator
         add_combo("--beam-hardening-method", ["none","standard"], default="none")
@@ -739,12 +777,14 @@ class TomoGUI(QWidget):
         add_dspin("--source-distance", 0.0, 1e9, step=0.1, default=36.0)
         add_dspin("--step-E", 0.0, 1e9, step=1.0, default=500.0)
 
-        
         self.tabs.addTab(bhard_tab, "Hardening")
 
     def _gather_bhard_args(self):
         args = []
-        for flag, (kind, w) in self.bhard_widgets.items():
+        for flag, (kind, w, include_cb, _default) in self.bhard_widgets.items():
+            if not include_cb.isChecked():
+                continue #skip grayed lines
+            
             if kind == "line":
                 val = w.text().strip()
                 if val != "":
@@ -831,10 +871,10 @@ class TomoGUI(QWidget):
         add_dspin("--pixel-size", 0.0, 1e9, step=0.01, default=0.0)        
         add_dspin("--energy", 0.0, 1e6, step=0.1, default=0.0)
         add_dspin("--propagation-distance", 0.0, 1e6, step=0.1, default=0.0)        
-        #add_dspin("--retrieve-phase-W", 0.0, 1.0, step=0.0001,default=0.0002)
+        add_dspin("--retrieve-phase-W", 0.0, 1.0, step=0.0001,default=0.0002)
         add_dspin("--retrieve-phase-alpha", 0.0, 1e6, step=0.0001,default=0.0)
-        #add_dspin("--retrieve-phase-delta-beta", 0.0, 1e9, step=0.1,default=1500.0)
-        #add_spin("--retrieve-phase-pad", 0, 1024, step=1,default=1)
+        add_dspin("--retrieve-phase-delta-beta", 0.0, 1e9, step=0.1,default=1500.0)
+        add_spin("--retrieve-phase-pad", 0, 1024, step=1,default=1)
   
         self.tabs.addTab(phase_tab, "Phase")
 
@@ -924,6 +964,7 @@ class TomoGUI(QWidget):
             self.rings_widgets[flag] = ("dspin", w)
             form.addRow(QLabel(flag), w)
 
+
         # Stripe/ring filters
         add_combo("--remove-stripe-method", ["none","fw","ti","vo-all"], default="none")        
         add_combo("--fw-filter", ["haar","db5","sym5","sym16"], default="sym16")
@@ -954,6 +995,7 @@ class TomoGUI(QWidget):
             elif kind == "spin":
                 args += [flag, str(w.value())]
             elif kind == "dspin":
+                if 
                 args += [flag, str(w.value())]
 
         return args
