@@ -589,7 +589,7 @@ class TomoGUI(QWidget):
             h.addStretch(1)
             form.addRow(label_widget, w)
 
-            self.bhard_widgets[flag] = (kind, w, include_cb, default)
+            self.param_widgets[flag] = (kind, w, include_cb, default)
 
         def add_line(flag, placeholder="", tip="", width=240, include=True):
             w = QLineEdit()
