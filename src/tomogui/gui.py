@@ -20,7 +20,7 @@ from matplotlib.widgets import RectangleSelector
 from matplotlib.backend_bases import MouseButton
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import h5py, json
-from datatime import datetime
+from datetime import datetime
 
 # Load matplotlib style from package resources
 matplotlib.rcdefaults()
