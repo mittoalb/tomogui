@@ -215,7 +215,7 @@ class TomoGUI(QWidget):
         load_param_btn.setEnabled(True) #enable
         load_param_btn.clicked.connect(self.load_params_from_file)
         reset_param_btn = QPushButton("Reset params")
-        reset_param_btn.setEnabled(False) #enable
+        reset_param_btn.setEnabled(True) #enable
         reset_param_btn.clicked.connect(self.reset_init_params)
         others_layout_3.addWidget(save_param_btn)
         others_layout_3.addWidget(load_param_btn)
@@ -1859,8 +1859,55 @@ class TomoGUI(QWidget):
                             pass
         self.log_output.append(f'\u2705 Loaded params from {load_fn}')
     def reset_init_params(self):
-        pass
-    
+        #parameters always included in recon
+        init_flags_values = {"--binning": "0", "--file-type": "standard", "--bright-ratio": "1.0",
+                               "--center-search-step": "0.5", "--center-search-width": "50.0",
+                               "--dezinger": "5", "--fbp-filter": "parzen",
+                               "--find-center-end-row": "-1", "--find-center-start-row": "0",
+                               "--flat-linear": "False", "--minus-log": "True",
+                               "--nsino": "0.5", "--rotation-axis-method": "sift", "--pre-processing": "True",
+                                "--reconstruction-algorithm": "fourierrec", #params in params_widgets
+                                "--remove-stripe-method": "none", #params in rings_widgets
+                                "--save-format": "tiff", "--logs-home": "/home/user/logs", "--verbose": "", #params in data_widgets
+                                "--clear-folder": "False", "--dtype": "float32", 
+                                "--start-column": "0", "--end-column": "-1", "--start-proj": "0", "--end-proj": "-1",
+                                "--start-row": "0", "--end-row": "-1", "--nproj-per-chunk": "8",
+                                "--nsino-per-chunk": "8", "--max-read-threads": "4", "--max-write-threads": "8"} #params in perf_widgets                      
+        for widgets in [self.param_widgets, self.phase_widgets, self.Geometry_widgets,
+                        self.bhard_widgets, self.rings_widgets, self.perf_widgets, self.data_widgets]:   
+            if widgets == self.Geometry_widgets or widgets == self.bhard_widgets or widgets == self.phase_widgets:
+                for flag, (kind, w, include_cb, _default) in widgets.items():
+                    if include_cb is not None and include_cb.isChecked():
+                        include_cb.setChecked(False)
+            else:
+                for flag, (kind, w, include_cb, _default) in widgets.items():
+                    if include_cb is not None and include_cb.isChecked():
+                        include_cb.setChecked(False)
+                    if flag in init_flags_values.keys():
+                        v = init_flags_values[flag]
+                        if kind == "line":
+                            w.setText(v)
+                        elif kind == "combo":
+                            if v in [w.itemText(i) for i in range(w.count())]:
+                                w.setCurrentText(v)
+                        elif kind == "check":
+                            w.setChecked(v.lower() in ("true","1","yes","checked"))
+                        elif kind == "spin":
+                            try:
+                                iv = int(v)
+                                if w.minimum() <= iv <= w.maximum():
+                                    w.setValue(iv)
+                            except Exception:
+                                pass
+                        elif kind == "dspin":
+                            try:
+                                fv = float(v)
+                                if w.minimum() <= fv <= w.maximum():
+                                    w.setValue(fv)
+                            except Exception:
+                                pass
+        self.log_output.append(f'\u2705 Reset parameters to initial values')
+
     def clear_log(self):
         self.log_output.clear()
 
