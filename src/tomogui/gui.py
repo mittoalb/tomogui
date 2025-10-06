@@ -1809,9 +1809,10 @@ class TomoGUI(QWidget):
         dialog.setNameFilters(["JSON files (*.json)", "All files (*)"])
         dialog.selectNameFilter("JSON files (*.json)")
         dialog.setDirectory(start_dir)
+        load_fn = None
         if dialog.exec():
             load_fn = dialog.selectedFiles()[0]
-        if not os.path.isfile(load_fn):
+        if not load_fn or not os.path.isfile(load_fn):
             self.log_output.append(f'\u274c Invalid file: {load_fn}')
             return
         with open(load_fn, "r") as f:
