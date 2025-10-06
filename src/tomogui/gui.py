@@ -1772,9 +1772,9 @@ class TomoGUI(QWidget):
     def save_params_to_file(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         fn = f"{self.data_path.text().strip()}/tomocupy_reconparams_{timestamp}.json"
+        params = {} #gather all enabled params
         for widgets in [self.param_widgets, self.phase_widgets, self.Geometry_widgets,
-                        self.bhard_widgets, self.rings_widgets, self.perf_widgets, self.data_widgets]:   
-            params = {} 
+                        self.bhard_widgets, self.rings_widgets, self.perf_widgets, self.data_widgets]:    
             for flag, (kind, w, include_cb, _default) in widgets.items():
                 if include_cb is not None and not include_cb.isChecked():
                     continue #skip grayed lines
