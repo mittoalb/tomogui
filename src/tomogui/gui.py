@@ -386,7 +386,7 @@ class TomoGUI(QWidget):
         log_box_layout.addWidget(QLabel("Log Output:"))
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
-        self.log_output = None
+        self.log_output = "start GUI"
         log_box_layout.addWidget(self.log_output)
         log_json_layout.addLayout(log_box_layout)
         #json_box_layout = QVBoxLayout()
@@ -2010,7 +2010,7 @@ class TomoGUI(QWidget):
         name = f"{job_label}-{scan_id}" if scan_id else job_label
 
         cli_str = " ".join(map(str, cmd))
-        self.log_output.append(f'<span style="color:green;">\U0001f680 [{name}] start: {cli_str}</span>')
+        self.log_output.append(f'\U0001f680 [{name}] start: {cli_str}')
         QApplication.processEvents()
 
         p = QProcess(self)
@@ -2211,7 +2211,7 @@ class TomoGUI(QWidget):
                 self.log_output.append(f'<span style="color:red;">\u274c wrong rotation axis input</span>')
                 return
         if self.use_conf_box.isChecked():
-            self.log_output.append('\u26a0\ufe0f You are using config file, only recon type, filename, rot axis from GUI')
+            self.log_output.append('\ufe0f You are using config file, only recon type, filename, rot axis from GUI')
             config_text = self.config_editor_try.toPlainText()
             if not config_text.strip():
                 self.log_output.append(f'<span style="color:red;">\u26a0\ufe0f No text in conf, stop</span>')
@@ -2223,7 +2223,7 @@ class TomoGUI(QWidget):
                     "--reconstruction-type", "try", 
                     "--config", temp_try]      
         else:      
-            self.log_output.append('\u26a0\ufe0f You are using params from GUI')
+            self.log_output.append('\ufe0f You are using params from GUI')
             cmd = ["tomocupy", str(recon_way), 
                     "--reconstruction-type", "try"]        
         summary = {"done": [], "fail": [], 'no_file': []}
@@ -2664,6 +2664,9 @@ class TomoGUI(QWidget):
 
     def reset_img_contrast(self): #link to Reset button
         if self._current_img is not None:
+
+
+
             if not isinstance(self._current_img_path, str):
                 self._current_img = self._safe_open_prj(self._current_img_path)
             else:
@@ -2671,7 +2674,7 @@ class TomoGUI(QWidget):
             self.vmin, self.vmax = round(self._current_img.min(), 5), round(self._current_img.max(), 5)
             self.min_input.setText(str(self.vmin))
             self.max_input.setText(str(self.vmax))
-            self.refresh_current_image()
+            #self.refresh_current_image()
         else:
             self.log_output.append("No image loaded to reset contrast.")
 
