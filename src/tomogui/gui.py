@@ -2440,6 +2440,7 @@ class TomoGUI(QWidget):
         json_path = os.path.join(data_folder, "rot_cen.json")
         if not os.path.exists(json_path):
             self.log_output.append("\u274c[ERROR] no rot_cen.json")
+            self.refresh_json_btn.setEnabled(True)
             return
         try:
             with open(json_path, "r") as f:
