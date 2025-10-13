@@ -269,10 +269,10 @@ class TomoGUI(QWidget):
         batch_full_layout = QHBoxLayout()
         batch_full_btn = QPushButton("Batch Full")
         batch_full_btn.clicked.connect(self.batch_full_reconstruction)
-        refresh_json_btn = QPushButton("Refresh COR log")
-        refresh_json_btn.clicked.connect(self.refresh_cor_json)
+        self.refresh_json_btn = QPushButton("Refresh COR log")
+        self.refresh_json_btn.clicked.connect(self.refresh_cor_json)
         batch_full_layout.addWidget(batch_full_btn)
-        batch_full_layout.addWidget(refresh_json_btn)
+        batch_full_layout.addWidget(self.refresh_json_btn)
         full_form.addRow(batch_full_layout)
         #right - row 5: COR Log file
         json_box_layout = QVBoxLayout()
