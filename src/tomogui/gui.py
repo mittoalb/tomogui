@@ -226,7 +226,11 @@ class TomoGUI(QWidget):
         clear_log_btn = QPushButton("Clear Log")
         clear_log_btn.setEnabled(True) #enable
         clear_log_btn.clicked.connect(self.clear_log)    
+        save_log_btn = QPushButton("Save Log")
+        save_log_btn.setEnabled(False) #disable 
+        save_log_btn.clicked.connect(self.save_log)
         others_layout_4.addWidget(clear_log_btn)
+        others_layout_4.addWidget(save_log_btn)
         others_form.addRow(others_layout_4)
 
         others.setLayout(others_form)
@@ -382,6 +386,7 @@ class TomoGUI(QWidget):
         log_box_layout.addWidget(QLabel("Log Output:"))
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
+        self.log_output = None
         log_box_layout.addWidget(self.log_output)
         log_json_layout.addLayout(log_box_layout)
         #json_box_layout = QVBoxLayout()
@@ -1757,7 +1762,7 @@ class TomoGUI(QWidget):
         self.proj_file_box.clear()
         folder = self.data_path.text()
         if folder and os.path.isdir(folder):
-            for f in sorted(glob.glob(os.path.join(folder, "*.h5"))):
+            for f in glob.glob(os.path.join(folder, "*.h5")).sort(key=os.path.getmtime, reverse=True): #newest → oldest
                 self.proj_file_box.addItem(os.path.basename(f), f)
 
     def load_config(self):
@@ -1911,6 +1916,16 @@ class TomoGUI(QWidget):
     def clear_log(self):
         self.log_output.clear()
 
+    def save_log(self):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_fn = f"Process_log_{timestamp}.txt"
+        if not os.path.exists(log_fn):
+            with open(log_fn, "a", encoding="utf-8") as f:  
+                for line in self.log_output:
+                    f.write(f"{line}\n")
+            self.log_output.append(f'\u2705 Saved log to {log_fn}')
+
+
     def preset_beamhardening(self):
         enable_flags = ["--beam-hardening-method", "--calculate-source",
                         "--b-storage-ring","--e-storage-ring", 
@@ -1944,7 +1959,8 @@ class TomoGUI(QWidget):
                 kind, w, include_cb, _default = self.phase_widgets[flag]
                 if include_cb is not None and not include_cb.isChecked():
                     include_cb.setChecked(True)
-        self.log_output.append("Enable phase params")
+        self.recon_way_box_full.setCurrentText("recon_steps")
+        self.log_output.append("Enable phase params, set recon way to recon_steps for full recon")
 
     def preset_laminography(self):
         enable_flags = ["--lamino-angle", 
@@ -1957,9 +1973,9 @@ class TomoGUI(QWidget):
                 kind, w, include_cb, _default = self.Geometry_widgets[flag]
                 if include_cb is not None and not include_cb.isChecked():
                     include_cb.setChecked(True)
-        self.recon_way_box.setCurrentText("recon_steps")
+        #self.recon_way_box.setCurrentText("recon_steps")
         self.recon_way_box_full.setCurrentText("recon_steps")
-        self.log_output.append("Enable laminography params, set recon way to recon_steps")
+        self.log_output.append("Enable laminography params, set recon way to recon_steps for full recon")
         #place holder: any params need to disable?
 
     def abort_process(self):
@@ -2255,7 +2271,9 @@ class TomoGUI(QWidget):
 
     def batch_full_reconstruction(self):
         """use cor_log.json and the config file in the right config txt box files to do 
-            batch recon and delete cor_log.json and temp_full.conf after batch"""
+            batch recon and delete cor_log.json and temp_full.conf after batch, and only run batch recon full for files 
+            not reconstructed yet, or part recon
+            two cases: full recon, or part recon defining by tomocupy"""
         log_file = os.path.join(self.data_path.text(), "rot_cen.json")
         if not os.path.exists(log_file):
             self.log_output.append(f'<span style="color:red;">\u274c[ERROR] rot_cen.json not found</span>')
@@ -2281,25 +2299,28 @@ class TomoGUI(QWidget):
         summary = {"done": [], "fail": []}
         size = len(data)
         try:
-            for i, (proj_file, cor_value) in enumerate(data.items(), start=1):
-                cmd += ["--file-name", proj_file]
-                cmd += ["--rotation-axis", str(cor_value)]
-                # Append Params
-                cmd += self._gather_params_args()
-                cmd += self._gather_rings_args()
-                cmd += self._gather_bhard_args()
-                cmd += self._gather_phase_args()
-                cmd += self._gather_Geometry_args()        
-                cmd += self._gather_Data_args()                                        
-                cmd += self._gather_Performance_args()
-                                                        	
-                code = self.run_command_live(cmd, proj_file=proj_file, job_label=f"batch full {i}/{size}", wait=True)
-                if code == 0:
-                    self.log_output.append(f'<span style="color:green;">\u2705 Done full recon {proj_file}</span>')
-                    summary['done'].append(f"{os.path.basename(proj_file)}")
+            for i, (proj_file, (cor_value,status)) in enumerate(data.items(), start=1):
+                if status == "no_rec":
+                    cmd += ["--file-name", proj_file]
+                    cmd += ["--rotation-axis", str(cor_value)]
+                    # Append Params
+                    cmd += self._gather_params_args()
+                    cmd += self._gather_rings_args()
+                    cmd += self._gather_bhard_args()
+                    cmd += self._gather_phase_args()
+                    cmd += self._gather_Geometry_args()        
+                    cmd += self._gather_Data_args()                                        
+                    cmd += self._gather_Performance_args()
+                                                                
+                    code = self.run_command_live(cmd, proj_file=proj_file, job_label=f"batch full {i}/{size}", wait=True)
+                    if code == 0:
+                        self.log_output.append(f'<span style="color:green;">\u2705 Done full recon {proj_file}</span>')
+                        summary['done'].append(f"{os.path.basename(proj_file)}")
+                    else:
+                        self.log_output.append(f'<span style="color:red;">\u274c full recon {proj_file} failed</span>')
+                        summary['fail'].append(f"{os.path.basename(proj_file)}")      
                 else:
-                    self.log_output.append(f'<span style="color:red;">\u274c full recon {proj_file} failed</span>')
-                    summary['fail'].append(f"{os.path.basename(proj_file)}")                
+                    continue          
         finally:
             if self.use_conf_box.isChecked():
                 try:
@@ -2350,8 +2371,27 @@ class TomoGUI(QWidget):
             if result != QMessageBox.Yes:
                 self.log_output.append("\u26a0\ufe0fNot take COR")
                 return
-                
-        self.cor_data[proj_file] = cor_value
+        # check if recon folder exists and add comment to cor_log               
+        proj_name = os.path.splitext(os.path.basename(proj_file))[0]
+        full_dir = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec")
+        num_recon = len(glob.glob(f'{full_dir}/*.tiff'))
+        raw_prj = proj_file  # fixed: currentData() already carries the full path
+        try:
+            self._raw_h5 = h5py.File(raw_prj, "r")
+        except Exception as e:
+            self.log_output.append(f'<span style="color:red;">\u274c Failed to open H5: {e}</span>')
+            return
+        self.raw_files_y = self._raw_h5['/exchange/data'].shape[1] # y in prj, z in recon
+        self._raw_h5.close()
+
+        if os.path.exists(full_dir) & num_recon == self.raw_files_y:
+            status = "full_rec"
+        elif os.path.exists(full_dir) & num_recon < self.raw_files_y:
+            status = "part_rec"
+        elif os.path.exists(full_dir) is False:
+            status = "no_rec"
+        
+        self.cor_data[proj_file] = (cor_value, status)
         try:
             with open(json_path, "w") as f:
                 json.dump(self.cor_data, f, indent=2)
@@ -2361,10 +2401,10 @@ class TomoGUI(QWidget):
             return
 
         self.cor_json_output.clear()
-        for k, v in self.cor_data.items():
+        for k, (v1,v2) in self.cor_data.items():
             base = os.path.splitext(os.path.basename(k))[0]
-            last4 = base[-4:]
-            self.cor_json_output.append(f"{last4} : {v}")
+            last4 = base[-4:] #for 7bm
+            self.cor_json_output.append(f"{last4} : {v1} {v2}")
 
     def load_cor_to_jsonbox(self):
         data_folder = self.data_path.text().strip()
@@ -2379,13 +2419,14 @@ class TomoGUI(QWidget):
             with open(json_path, "r") as f:
                 self.cor_data = json.load(f)
             self.cor_json_output.clear()
-            for k, v in self.cor_data.items():
+            for k, (v1, v2) in self.cor_data.items():
                 base = os.path.splitext(os.path.basename(k))[0]
-                last4 = base[-4:]
-                self.cor_json_output.append(f"{last4} : {v}")
+                last4 = base[-4:] #for 7bm
+                self.cor_json_output.append(f"{last4} : {v1} {v2}")
             self.log_output.append("\u2705[INFO] COR log reloaded.")
         except Exception as e:
             self.log_output.append(f"\u274c[ERROR] Failed to load COR log: {e}")
+            return
 
     # ===== IMAGE VIEWING =====
     def view_raw(self):
