@@ -1763,7 +1763,7 @@ class TomoGUI(QWidget):
         self.proj_file_box.clear()
         folder = self.data_path.text()
         if folder and os.path.isdir(folder):
-            for f in glob.glob(os.path.join(folder, "*.h5")).sort(key=os.path.getmtime, reverse=True): #newest → oldest
+            for f in sorted(glob.glob(os.path.join(folder, "*.h5")),key=os.path.getmtime, reverse=True): #newest → oldest
                 self.proj_file_box.addItem(os.path.basename(f), f)
 
     def load_config(self):
