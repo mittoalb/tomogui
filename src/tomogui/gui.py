@@ -256,7 +256,7 @@ class TomoGUI(QWidget):
         self.recon_way_box_full.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.recon_way_box_full.addItems(["recon","recon_steps"])
         self.recon_way_box_full.setCurrentIndex(0) # make recon as default
-        full_cuda_layout.addRow(self.recon_way_box_full)
+        full_cuda_layout.addWidget(self.recon_way_box_full)
         full_cuda_layout.addWidget(QLabel("cuda"))
         self.cuda_box_full = QComboBox()
         self.cuda_box_full.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
