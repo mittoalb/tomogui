@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QTabWidget, QFormLayout, QCheckBox, QSpinBox, QDoubleSpinBox,
     QScrollArea
 )
-from PyQt5.QtCore import Qt, QEvent, QProcess, QEventLoop, QSize
+from PyQt5.QtCore import Qt, QEvent, QProcess, QEventLoop, QSize, QProcessEnvironment
 
 from PIL import Image
 from matplotlib.widgets import RectangleSelector
@@ -138,11 +138,20 @@ class TomoGUI(QWidget):
         try_box = QGroupBox("Try Reconstruction")
         try_form = QFormLayout()
         #left - row 1
+        try_cuda_layout = QHBoxLayout()
+        try_cuda_layout.addWidget(QLabel("Recon method"))
         self.recon_way_box = QComboBox()
         self.recon_way_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.recon_way_box.addItems(["recon","recon_steps"])
         self.recon_way_box.setCurrentIndex(0) # make recon as default
-        try_form.addRow("Reconstruction way", self.recon_way_box)
+        try_cuda_layout.addWidget(self.recon_way_box)
+        try_cuda_layout.addWidget(QLabel("cuda"))
+        self.cuda_box_try = QComboBox()
+        self.cuda_box_try.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.cuda_box_try.addItems(["0","1"])
+        self.cuda_box_try.setCurrentIndex(0) # make cuda 0 as default
+        try_cuda_layout.addWidget(self.cuda_box_try)
+        try_form.addRow(try_cuda_layout)
         #row 2
         self.cor_method_box = QComboBox()
         self.cor_method_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -227,7 +236,7 @@ class TomoGUI(QWidget):
         clear_log_btn.setEnabled(True) #enable
         clear_log_btn.clicked.connect(self.clear_log)    
         save_log_btn = QPushButton("Save Log")
-        save_log_btn.setEnabled(False) #disable 
+        save_log_btn.setEnabled(True) #enable 
         save_log_btn.clicked.connect(self.save_log)
         others_layout_4.addWidget(clear_log_btn)
         others_layout_4.addWidget(save_log_btn)
@@ -241,14 +250,23 @@ class TomoGUI(QWidget):
         full_box = QGroupBox("Full Reconstruction")
         full_form = QFormLayout()
         #right - row 1 recon/recon_step
+        full_cuda_layout = QHBoxLayout()
+        full_cuda_layout.addWidget(QLabel("Recon method"))
         self.recon_way_box_full = QComboBox()
         self.recon_way_box_full.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.recon_way_box_full.addItems(["recon","recon_steps"])
         self.recon_way_box_full.setCurrentIndex(0) # make recon as default
-        full_form.addRow("Reconstruction way", self.recon_way_box_full)
+        full_cuda_layout.addRow(self.recon_way_box_full)
+        full_cuda_layout.addWidget(QLabel("cuda"))
+        self.cuda_box_full = QComboBox()
+        self.cuda_box_full.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.cuda_box_full.addItems(["0","1"])
+        self.cuda_box_full.setCurrentIndex(1) # make cuda 0 as default
+        full_cuda_layout.addWidget(self.cuda_box_full)
+        full_form.addRow(full_cuda_layout)
         #right - row 2: COR (Full), add COR btn
         cor_full_layout = QHBoxLayout()
-        cor_full_layout.addWidget(QLabel("COR (Full):"))
+        cor_full_layout.addWidget(QLabel("COR (Full)"))
         self.cor_input_full = QLineEdit()
         cor_full_layout.addWidget(self.cor_input_full)
         rec_cor_btn = QPushButton("Add COR")
@@ -2002,7 +2020,14 @@ class TomoGUI(QWidget):
 
         self.process.clear()
 
-    def run_command_live(self, cmd, proj_file=None, job_label=None, *, wait=False):
+    def run_command_live(self, cmd, proj_file=None, job_label=None, *, wait=False, cuda_devices=None):
+        """
+        cmd: list of command and args
+        proj_file: projections path
+        job_label: label for the job
+        wait: whether to wait for the process to finish, if False, return QProcess object immediately, if True, return exit code when finished
+        cuda_devices: str, e.g. "0", "1" for GPU tomocupy use
+        """
         scan_id = None
         if proj_file:
             try:
@@ -2022,6 +2047,12 @@ class TomoGUI(QWidget):
         p = QProcess(self)
         p.setProcessChannelMode(QProcess.ForwardedChannels)
 
+        #define env with CUDA_VISIBLE_DEVICES
+        env = QProcessEnvironment.systemEnvironment()
+        if cuda_devices is not None:
+            env.insert("CUDA_VISIBLE_DEVICES", str(cuda_devices))
+        p.setProcessEnvironment(env)
+        
         loop = QEventLoop() if wait else None
         result = {"code": None}
 
@@ -2078,6 +2109,8 @@ class TomoGUI(QWidget):
             except ValueError:
                 self.log_output.append(f'<span style="color:red;">\u274c wrong rotation axis input</span>')
                 return
+        # cuda for tomocupy try
+        gpu = self.cuda_box_try.currentText().strip()
         #add check box for config, seperate from selecting parameters from GUI
         if self.use_conf_box.isChecked():
             self.log_output.append("\u26a0\ufe0f You are using config file, only recon type, filename, rot axis from GUI")
@@ -2119,7 +2152,7 @@ class TomoGUI(QWidget):
             cmd += self._gather_Data_args()                        
             cmd += self._gather_Performance_args()
                                 
-        code = self.run_command_live(cmd, proj_file=proj_file, job_label="Try recon", wait=True)
+        code = self.run_command_live(cmd, proj_file=proj_file, job_label="Try recon", wait=True, cuda_devices=gpu)
         try:
             if code == 0:
                 self.log_output.append(f'<span style="color:green;">\u2705 Done try recon {proj_file}</span>')
@@ -2142,6 +2175,7 @@ class TomoGUI(QWidget):
         except ValueError:
             self.log_output.append(f'<span style="color:red;">\u274c[ERROR] Invalid Full COR value</span>')
             return
+        gpu = self.cuda_box_full.currentText().strip()
         if self.use_conf_box.isChecked():
             self.log_output.append("\u26a0\ufe0f You are using config file, only recon type, filename, rot axis from GUI")
             config_text = self.config_editor_full.toPlainText()
@@ -2173,7 +2207,7 @@ class TomoGUI(QWidget):
             cmd += self._gather_Data_args()                
             cmd += self._gather_Performance_args()
                                 
-        code = self.run_command_live(cmd, proj_file=proj_file, job_label="Full recon", wait=True)
+        code = self.run_command_live(cmd, proj_file=proj_file, job_label="Full recon", wait=True, cuda_devices=gpu)
         try:
             if code == 0:
                 self.log_output.append(f'<span style="color:green;">\u2705 Done full recon {proj_file}</span>')
@@ -2216,6 +2250,7 @@ class TomoGUI(QWidget):
             except ValueError:
                 self.log_output.append(f'<span style="color:red;">\u274c wrong rotation axis input</span>')
                 return
+        gpu = self.cuda_box_try.currentText().strip()
         if self.use_conf_box.isChecked():
             self.log_output.append('\ufe0f You are using config file, only recon type, filename, rot axis from GUI')
             config_text = self.config_editor_try.toPlainText()
@@ -2258,7 +2293,7 @@ class TomoGUI(QWidget):
                     cmd += self._gather_Data_args()                                          
                     cmd += self._gather_Performance_args()
                                 
-                code = self.run_command_live(cmd, proj_file=proj_file, job_label=f'batch try {i}/{total}', wait=True)
+                code = self.run_command_live(cmd, proj_file=proj_file, job_label=f'batch try {i}/{total}', wait=True, cuda_devices=gpu)
                 if code == 0:
                     self.log_output.append(f'<span style="color:green;">\u2705 Done try recon {proj_file}</span>')
                     summary['done'].append(scan_str)
@@ -2286,6 +2321,7 @@ class TomoGUI(QWidget):
             return
         with open(log_file) as f:
             data = json.load(f)
+        gpu = self.cuda_box_full.currentText().strip()
         if self.use_conf_box.isChecked():
             self.log_output.append(f"\u26a0\ufe0f You are using conf file, recon way is from GUI")
             config_text = self.config_editor_full.toPlainText()
@@ -2318,7 +2354,7 @@ class TomoGUI(QWidget):
                     cmd += self._gather_Data_args()                                        
                     cmd += self._gather_Performance_args()
                                                                 
-                    code = self.run_command_live(cmd, proj_file=proj_file, job_label=f"batch full {i}/{size}", wait=True)
+                    code = self.run_command_live(cmd, proj_file=proj_file, job_label=f"batch full {i}/{size}", wait=True, cuda_devices=gpu)
                     if code == 0:
                         self.log_output.append(f'<span style="color:green;">\u2705 Done full recon {proj_file}</span>')
                         summary['done'].append(f"{os.path.basename(proj_file)}")
@@ -2989,7 +3025,7 @@ class TomoGUI(QWidget):
                 cmd.extend(extra_params.split())
             
             QApplication.processEvents()
-            code = self.run_command_live(cmd, proj_file=input_fn, job_label="tomolog", wait=True)
+            code = self.run_command_live(cmd, proj_file=input_fn, job_label="tomolog", wait=True, cuda_devices=None)
             if code == 0:
                 self.log_output.append(f'<span style="color:green;">\u2705 Done tomolog {input_fn}</span>')
             else:
