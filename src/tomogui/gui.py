@@ -23,6 +23,7 @@ import h5py, json
 from datetime import datetime
 
 from .theme_manager import ThemeManager
+from .hdf5_viewer import HDF5ImageDividerDialog
 
 # Load matplotlib style from package resources
 matplotlib.rcdefaults()
@@ -1738,9 +1739,9 @@ class TomoGUI(QWidget):
 
         # File list table
         self.batch_file_table = QTableWidget()
-        self.batch_file_table.setColumnCount(8)
+        self.batch_file_table.setColumnCount(9)
         self.batch_file_table.setHorizontalHeaderLabels([
-            "Select", "Filename", "Size", "COR", "Status", "View Try", "View Full", "Actions"
+            "Select", "Filename", "Size", "COR", "Status", "View Data", "View Try", "View Full", "Actions"
         ])
 
         # Configure table
@@ -1755,6 +1756,7 @@ class TomoGUI(QWidget):
         header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(8, QHeaderView.ResizeToContents)
         header.setSectionsClickable(True)  # Make headers clickable for sorting
 
         main_layout.addWidget(self.batch_file_table)
@@ -3219,7 +3221,6 @@ class TomoGUI(QWidget):
 
         # Get reconstruction parameters from Main tab
         recon_way = self.recon_way_box.currentText()
-        cor_method = self.cor_method_box.currentText()
 
         # Get COR value EXCLUSIVELY from the batch table for this file
         filename = os.path.basename(file_path)
@@ -3229,21 +3230,23 @@ class TomoGUI(QWidget):
                 cor_val = file_info['cor_input'].text().strip()
                 break
 
+        # Batch tab ALWAYS uses manual COR with the value from the batch table
         # Validate COR input - batch tab requires COR to be set in table
-        if cor_method == "manual":
-            if not cor_val:
-                self.log_output.append(f'<span style="color:red;">❌ No COR value in batch table for {filename}</span>')
-                return -1
-            try:
-                cor = float(cor_val)
-                self.log_output.append(f'📍 Using COR value from batch table: {cor_val} for {filename}')
-            except ValueError:
-                self.log_output.append(f'<span style="color:red;">❌ Invalid COR value "{cor_val}" for {filename}</span>')
-                return -1
+        if not cor_val:
+            self.log_output.append(f'<span style="color:red;">❌ No COR value in batch table for {filename}</span>')
+            return -1
+
+        try:
+            cor = float(cor_val)
+            self.log_output.append(f'📍 Using COR value from batch table: {cor_val} for {filename}')
+        except ValueError:
+            self.log_output.append(f'<span style="color:red;">❌ Invalid COR value "{cor_val}" for {filename}</span>')
+            return -1
 
         gpu = self.cuda_box_try.currentText().strip() if recon_type == 'try' else self.cuda_box_full.currentText().strip()
 
         # Build command
+        # Batch tab ALWAYS uses manual COR with the value from the batch table
         if self.use_conf_box.isChecked():
             config_editor = self.config_editor_try if recon_type == 'try' else self.config_editor_full
             config_text = config_editor.toPlainText()
@@ -3258,21 +3261,15 @@ class TomoGUI(QWidget):
             cmd = ["tomocupy", str(recon_way),
                    "--reconstruction-type", recon_type,
                    "--config", temp_conf,
-                   "--file-name", file_path]
-
-            if cor_method == "auto":
-                cmd += ["--rotation-axis-auto", "auto"]
-            else:
-                cmd += ["--rotation-axis-auto", "manual", "--rotation-axis", str(cor)]
+                   "--file-name", file_path,
+                   "--rotation-axis-auto", "manual",
+                   "--rotation-axis", str(cor)]
         else:
             cmd = ["tomocupy", str(recon_way),
                    "--reconstruction-type", recon_type,
-                   "--file-name", file_path]
-
-            if cor_method == "auto":
-                cmd += ["--rotation-axis-auto", "auto"]
-            else:
-                cmd += ["--rotation-axis-auto", "manual", "--rotation-axis", str(cor)]
+                   "--file-name", file_path,
+                   "--rotation-axis-auto", "manual",
+                   "--rotation-axis", str(cor)]
 
         # Wrap command for remote execution if needed
         cmd = self._get_batch_machine_command(cmd, machine)
@@ -3363,15 +3360,20 @@ class TomoGUI(QWidget):
             self.batch_file_table.setItem(row, 4, status_item)
             file_info['status_item'] = status_item
 
+            # View Data button (original HDF5 data)
+            view_data_btn = QPushButton("View Data")
+            view_data_btn.clicked.connect(lambda checked, fp=file_path: self._batch_view_data(fp))
+            self.batch_file_table.setCellWidget(row, 5, view_data_btn)
+
             # View Try button
             view_try_btn = QPushButton("View Try")
             view_try_btn.clicked.connect(lambda checked, fp=file_path: self._batch_view_try(fp))
-            self.batch_file_table.setCellWidget(row, 5, view_try_btn)
+            self.batch_file_table.setCellWidget(row, 6, view_try_btn)
 
             # View Full button
             view_full_btn = QPushButton("View Full")
             view_full_btn.clicked.connect(lambda checked, fp=file_path: self._batch_view_full(fp))
-            self.batch_file_table.setCellWidget(row, 6, view_full_btn)
+            self.batch_file_table.setCellWidget(row, 7, view_full_btn)
 
             # Actions button
             actions_widget = QWidget()
@@ -3389,7 +3391,7 @@ class TomoGUI(QWidget):
             full_btn.clicked.connect(lambda checked, fp=file_path: self._batch_run_full_single(fp))
             actions_layout.addWidget(full_btn)
 
-            self.batch_file_table.setCellWidget(row, 7, actions_widget)
+            self.batch_file_table.setCellWidget(row, 8, actions_widget)
 
         self.batch_status_label.setText(f"Loaded {len(h5_files)} files")
 
@@ -3539,6 +3541,21 @@ class TomoGUI(QWidget):
 
         # Refresh the main file dropdown
         self.refresh_h5_files()
+
+    def _batch_view_data(self, file_path):
+        """Open HDF5 viewer to view original data"""
+        if not os.path.exists(file_path):
+            QMessageBox.warning(self, "File Not Found", f"File does not exist:\n{file_path}")
+            return
+
+        try:
+            # Create and show the HDF5 viewer dialog
+            viewer = HDF5ImageDividerDialog(file_path=file_path, parent=self)
+            viewer.show()
+            self.log_output.append(f'<span style="color:green;">✅ Opened HDF5 viewer for: {os.path.basename(file_path)}</span>')
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open HDF5 viewer:\n{str(e)}")
+            self.log_output.append(f'<span style="color:red;">❌ Failed to open HDF5 viewer: {str(e)}</span>')
 
     def _batch_view_try(self, file_path):
         """View try reconstruction for a specific file"""
@@ -3818,30 +3835,31 @@ class TomoGUI(QWidget):
 
         # Get reconstruction parameters from Main tab
         recon_way = self.recon_way_box.currentText()
-        cor_method = self.cor_method_box.currentText()
 
         # Get COR value EXCLUSIVELY from batch table (not from Main tab)
         cor_val = file_info['cor_input'].text().strip()
 
+        # Batch tab always uses manual COR with the value from the batch table
         # Validate COR - batch tab requires COR value to be set
-        if cor_method == "manual":
-            if not cor_val:
-                self.log_output.append(f'<span style="color:orange;">⚠️  No COR value in batch table for {filename}, skipping</span>')
-                # Return a dummy finished process
-                p = QProcess(self)
-                p.start("echo", ["skipped"])
-                p.waitForFinished()
-                return p
-            try:
-                cor = float(cor_val)
-            except ValueError:
-                self.log_output.append(f'<span style="color:red;">❌ Invalid COR value "{cor_val}" for {filename}, skipping</span>')
-                p = QProcess(self)
-                p.start("echo", ["skipped"])
-                p.waitForFinished()
-                return p
+        if not cor_val:
+            self.log_output.append(f'<span style="color:orange;">⚠️  No COR value in batch table for {filename}, skipping</span>')
+            # Return a dummy finished process
+            p = QProcess(self)
+            p.start("echo", ["skipped"])
+            p.waitForFinished()
+            return p
+
+        try:
+            cor = float(cor_val)
+        except ValueError:
+            self.log_output.append(f'<span style="color:red;">❌ Invalid COR value "{cor_val}" for {filename}, skipping</span>')
+            p = QProcess(self)
+            p.start("echo", ["skipped"])
+            p.waitForFinished()
+            return p
 
         # Build command
+        # Batch tab ALWAYS uses manual COR with the value from the batch table
         if self.use_conf_box.isChecked():
             config_editor = self.config_editor_try if recon_type == 'try' else self.config_editor_full
             config_text = config_editor.toPlainText()
@@ -3853,21 +3871,15 @@ class TomoGUI(QWidget):
             cmd = ["tomocupy", str(recon_way),
                    "--reconstruction-type", recon_type,
                    "--config", temp_conf,
-                   "--file-name", file_path]
-
-            if cor_method == "auto":
-                cmd += ["--rotation-axis-auto", "auto"]
-            else:
-                cmd += ["--rotation-axis-auto", "manual", "--rotation-axis", str(cor)]
+                   "--file-name", file_path,
+                   "--rotation-axis-auto", "manual",
+                   "--rotation-axis", str(cor)]
         else:
             cmd = ["tomocupy", str(recon_way),
                    "--reconstruction-type", recon_type,
-                   "--file-name", file_path]
-
-            if cor_method == "auto":
-                cmd += ["--rotation-axis-auto", "auto"]
-            else:
-                cmd += ["--rotation-axis-auto", "manual", "--rotation-axis", str(cor)]
+                   "--file-name", file_path,
+                   "--rotation-axis-auto", "manual",
+                   "--rotation-axis", str(cor)]
 
         # Wrap for remote execution if needed
         cmd = self._get_batch_machine_command(cmd, machine)
