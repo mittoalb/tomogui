@@ -3552,7 +3552,25 @@ class TomoGUI(QWidget):
         self.view_full_reconstruction()
 
     def _batch_run_try_single(self, file_path):
-        """Run try reconstruction on a single file"""
+        """Run try reconstruction on a single file using batch table COR"""
+        # Find the file info in batch list
+        file_info = None
+        for f in self.batch_file_list:
+            if f['path'] == file_path:
+                file_info = f
+                break
+
+        if not file_info:
+            self.log_output.append(f'<span style="color:red;">❌ File not found in batch list</span>')
+            return
+
+        # Get COR value from batch table
+        batch_cor = file_info['cor_input'].text().strip()
+        if not batch_cor:
+            self.log_output.append(f'<span style="color:red;">❌ No COR value in batch table for {os.path.basename(file_path)}</span>')
+            QMessageBox.warning(self, "Missing COR", f"Please enter a COR value in the batch table for:\n{os.path.basename(file_path)}")
+            return
+
         # Set the file in the main dropdown
         index = self.proj_file_box.findData(file_path)
         if index >= 0:
@@ -3563,23 +3581,44 @@ class TomoGUI(QWidget):
             if index >= 0:
                 self.proj_file_box.setCurrentIndex(index)
 
+        # Temporarily set the Main tab COR to the batch table value
+        original_cor = self.cor_input.text()
+        self.cor_input.setText(batch_cor)
+        self.log_output.append(f'📍 Using COR from batch table: {batch_cor} for {os.path.basename(file_path)}')
+
         # Update status in batch table
-        for file_info in self.batch_file_list:
-            if file_info['path'] == file_path:
-                file_info['status_item'].setText('Running Try...')
-                break
+        file_info['status_item'].setText('Running Try...')
+        QApplication.processEvents()
 
         # Call the existing try reconstruction method
         self.try_reconstruction()
 
+        # Restore original COR value in Main tab
+        self.cor_input.setText(original_cor)
+
         # Update status
-        for file_info in self.batch_file_list:
-            if file_info['path'] == file_path:
-                file_info['status_item'].setText('Try Complete')
-                break
+        file_info['status_item'].setText('Try Complete')
 
     def _batch_run_full_single(self, file_path):
-        """Run full reconstruction on a single file"""
+        """Run full reconstruction on a single file using batch table COR"""
+        # Find the file info in batch list
+        file_info = None
+        for f in self.batch_file_list:
+            if f['path'] == file_path:
+                file_info = f
+                break
+
+        if not file_info:
+            self.log_output.append(f'<span style="color:red;">❌ File not found in batch list</span>')
+            return
+
+        # Get COR value from batch table
+        batch_cor = file_info['cor_input'].text().strip()
+        if not batch_cor:
+            self.log_output.append(f'<span style="color:red;">❌ No COR value in batch table for {os.path.basename(file_path)}</span>')
+            QMessageBox.warning(self, "Missing COR", f"Please enter a COR value in the batch table for:\n{os.path.basename(file_path)}")
+            return
+
         # Set the file in the main dropdown
         index = self.proj_file_box.findData(file_path)
         if index >= 0:
@@ -3590,20 +3629,23 @@ class TomoGUI(QWidget):
             if index >= 0:
                 self.proj_file_box.setCurrentIndex(index)
 
+        # Temporarily set the Main tab COR to the batch table value
+        original_cor = self.cor_input.text()
+        self.cor_input.setText(batch_cor)
+        self.log_output.append(f'📍 Using COR from batch table: {batch_cor} for {os.path.basename(file_path)}')
+
         # Update status in batch table
-        for file_info in self.batch_file_list:
-            if file_info['path'] == file_path:
-                file_info['status_item'].setText('Running Full...')
-                break
+        file_info['status_item'].setText('Running Full...')
+        QApplication.processEvents()
 
         # Call the existing full reconstruction method
         self.full_reconstruction()
 
+        # Restore original COR value in Main tab
+        self.cor_input.setText(original_cor)
+
         # Update status
-        for file_info in self.batch_file_list:
-            if file_info['path'] == file_path:
-                file_info['status_item'].setText('Full Complete')
-                break
+        file_info['status_item'].setText('Full Complete')
 
     def _batch_run_try_selected(self):
         """Run try reconstruction on all selected files with GPU queue management"""
