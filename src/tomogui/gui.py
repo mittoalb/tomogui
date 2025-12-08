@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QTextEdit, QLineEdit, QLabel, QProgressBar,
     QComboBox, QSlider, QGroupBox, QSizePolicy, QMessageBox,
     QTabWidget, QFormLayout, QCheckBox, QSpinBox, QDoubleSpinBox,
-    QScrollArea
+    QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
 )
 from PyQt5.QtCore import Qt, QEvent, QProcess, QEventLoop, QSize, QProcessEnvironment
 
@@ -21,6 +21,8 @@ from matplotlib.backend_bases import MouseButton
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import h5py, json
 from datetime import datetime
+
+from .theme_manager import ThemeManager
 
 # Load matplotlib style from package resources
 matplotlib.rcdefaults()
@@ -37,6 +39,10 @@ class TomoGUI(QWidget):
         super().__init__()
         self.setWindowTitle("TomoGUI")
         self.resize(1650, 950)
+
+        # Initialize theme manager (will apply theme after UI is built)
+        self.theme_manager = ThemeManager()
+        self.theme_manager.register_callback(self._on_theme_changed)
 
         # State
         self.default_cmap = "gray"
@@ -498,6 +504,14 @@ class TomoGUI(QWidget):
         self.max_input.editingFinished.connect(self.update_vmin_vmax)
         toolbar_row.addWidget(self.max_input)
 
+        # Theme toggle button
+        toolbar_row.addSpacing(10)
+        self.theme_toggle_btn = QPushButton("🌙" if self.theme_manager.get_current_theme() == 'bright' else "☀")
+        self.theme_toggle_btn.setFixedWidth(35)
+        self.theme_toggle_btn.setToolTip("Toggle bright/dark theme")
+        self.theme_toggle_btn.clicked.connect(self._toggle_theme)
+        toolbar_row.addWidget(self.theme_toggle_btn)
+
         right_layout.addLayout(toolbar_row)
         self.canvas.installEventFilter(self)
 
@@ -587,6 +601,9 @@ class TomoGUI(QWidget):
 
         main_layout.addLayout(right_layout, 4)
         self.setLayout(main_layout)
+
+        # Apply initial theme after UI is fully built
+        self.theme_manager.apply_theme(self.theme_manager.get_current_theme())
 
     # ===== PARAMS TAB =====
     def _build_params_tab(self):
@@ -1681,7 +1698,95 @@ class TomoGUI(QWidget):
         config_txt_main.addWidget(right_full_box,1)
         config_main.addLayout(config_txt_main)
 
-    
+        # ==== BATCH PROCESSING TAB ====
+        batch_tab = QWidget()
+        self.tabs.addTab(batch_tab, "Batch Processing")
+        self._build_batch_tab(batch_tab)
+
+    def _build_batch_tab(self, batch_tab):
+        """Build the batch processing tab for managing multiple datasets"""
+        main_layout = QVBoxLayout(batch_tab)
+
+        # Top controls
+        controls_layout = QHBoxLayout()
+
+        refresh_list_btn = QPushButton("Refresh File List")
+        refresh_list_btn.clicked.connect(self._refresh_batch_file_list)
+        controls_layout.addWidget(refresh_list_btn)
+
+        controls_layout.addStretch()
+
+        select_all_btn = QPushButton("Select All")
+        select_all_btn.clicked.connect(self._batch_select_all)
+        controls_layout.addWidget(select_all_btn)
+
+        deselect_all_btn = QPushButton("Deselect All")
+        deselect_all_btn.clicked.connect(self._batch_deselect_all)
+        controls_layout.addWidget(deselect_all_btn)
+
+        main_layout.addLayout(controls_layout)
+
+        # File list table
+        self.batch_file_table = QTableWidget()
+        self.batch_file_table.setColumnCount(6)
+        self.batch_file_table.setHorizontalHeaderLabels([
+            "Select", "Filename", "Status", "View Try", "View Full", "Actions"
+        ])
+
+        # Configure table
+        self.batch_file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.batch_file_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        header = self.batch_file_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+
+        main_layout.addWidget(self.batch_file_table)
+
+        # Batch operations
+        batch_ops_layout = QHBoxLayout()
+
+        batch_ops_layout.addWidget(QLabel("Batch Operations (on selected):"))
+
+        batch_try_btn = QPushButton("Run Try on Selected")
+        batch_try_btn.clicked.connect(self._batch_run_try_selected)
+        batch_ops_layout.addWidget(batch_try_btn)
+
+        batch_full_btn = QPushButton("Run Full on Selected")
+        batch_full_btn.clicked.connect(self._batch_run_full_selected)
+        batch_ops_layout.addWidget(batch_full_btn)
+
+        batch_ops_layout.addStretch()
+
+        remove_selected_btn = QPushButton("Remove Selected from List")
+        remove_selected_btn.clicked.connect(self._batch_remove_selected)
+        batch_ops_layout.addWidget(remove_selected_btn)
+
+        main_layout.addLayout(batch_ops_layout)
+
+        # Progress section
+        progress_group = QGroupBox("Batch Progress")
+        progress_layout = QVBoxLayout()
+
+        self.batch_progress_bar = QProgressBar()
+        self.batch_progress_bar.setValue(0)
+        progress_layout.addWidget(self.batch_progress_bar)
+
+        self.batch_status_label = QLabel("Ready")
+        progress_layout.addWidget(self.batch_status_label)
+
+        progress_group.setLayout(progress_layout)
+        main_layout.addWidget(progress_group)
+
+        # Initialize batch state
+        self.batch_file_list = []
+        self.batch_current_index = 0
+        self.batch_running = False
+
+
     # ===== HELPER METHODS =====
     
     def help_tomo(self):
@@ -3029,6 +3134,340 @@ class TomoGUI(QWidget):
                 self.log_output.append(f'<span style="color:green;">\u2705 Done tomolog {input_fn}</span>')
             else:
                 self.log_output.append(f'<span style="color:red;">\u274c Tomolog {input_fn} failed</span>')
+
+    # ===== BATCH PROCESSING METHODS =====
+
+    def _refresh_batch_file_list(self):
+        """Refresh the file list in the batch processing tab"""
+        folder = self.data_path.text()
+        if not folder or not os.path.isdir(folder):
+            QMessageBox.warning(self, "Warning", "Please select a valid data folder first.")
+            return
+
+        # Get all .h5 files
+        h5_files = sorted(glob.glob(os.path.join(folder, "*.h5")), key=os.path.getmtime, reverse=True)
+
+        # Clear existing table
+        self.batch_file_table.setRowCount(0)
+        self.batch_file_list = []
+
+        # Populate table
+        for file_path in h5_files:
+            filename = os.path.basename(file_path)
+            row = self.batch_file_table.rowCount()
+            self.batch_file_table.insertRow(row)
+
+            # Store file info
+            file_info = {
+                'path': file_path,
+                'filename': filename,
+                'status': 'Ready',
+                'row': row
+            }
+            self.batch_file_list.append(file_info)
+
+            # Checkbox for selection
+            checkbox = QCheckBox()
+            checkbox_widget = QWidget()
+            checkbox_layout = QHBoxLayout(checkbox_widget)
+            checkbox_layout.addWidget(checkbox)
+            checkbox_layout.setAlignment(Qt.AlignCenter)
+            checkbox_layout.setContentsMargins(0, 0, 0, 0)
+            self.batch_file_table.setCellWidget(row, 0, checkbox_widget)
+            file_info['checkbox'] = checkbox
+
+            # Filename
+            self.batch_file_table.setItem(row, 1, QTableWidgetItem(filename))
+
+            # Status
+            status_item = QTableWidgetItem('Ready')
+            self.batch_file_table.setItem(row, 2, status_item)
+            file_info['status_item'] = status_item
+
+            # View Try button
+            view_try_btn = QPushButton("View Try")
+            view_try_btn.clicked.connect(lambda checked, fp=file_path: self._batch_view_try(fp))
+            self.batch_file_table.setCellWidget(row, 3, view_try_btn)
+
+            # View Full button
+            view_full_btn = QPushButton("View Full")
+            view_full_btn.clicked.connect(lambda checked, fp=file_path: self._batch_view_full(fp))
+            self.batch_file_table.setCellWidget(row, 4, view_full_btn)
+
+            # Actions button
+            actions_widget = QWidget()
+            actions_layout = QHBoxLayout(actions_widget)
+            actions_layout.setContentsMargins(2, 2, 2, 2)
+            actions_layout.setSpacing(2)
+
+            try_btn = QPushButton("Try")
+            try_btn.setFixedWidth(50)
+            try_btn.clicked.connect(lambda checked, fp=file_path: self._batch_run_try_single(fp))
+            actions_layout.addWidget(try_btn)
+
+            full_btn = QPushButton("Full")
+            full_btn.setFixedWidth(50)
+            full_btn.clicked.connect(lambda checked, fp=file_path: self._batch_run_full_single(fp))
+            actions_layout.addWidget(full_btn)
+
+            self.batch_file_table.setCellWidget(row, 5, actions_widget)
+
+        self.batch_status_label.setText(f"Loaded {len(h5_files)} files")
+
+    def _batch_select_all(self):
+        """Select all files in the batch list"""
+        for file_info in self.batch_file_list:
+            file_info['checkbox'].setChecked(True)
+
+    def _batch_deselect_all(self):
+        """Deselect all files in the batch list"""
+        for file_info in self.batch_file_list:
+            file_info['checkbox'].setChecked(False)
+
+    def _batch_remove_selected(self):
+        """Physically delete selected files from the filesystem"""
+        files_to_remove = [f for f in self.batch_file_list if f['checkbox'].isChecked()]
+
+        if not files_to_remove:
+            QMessageBox.warning(self, "Warning", "No files selected.")
+            return
+
+        # Confirm deletion
+        reply = QMessageBox.question(
+            self, 'Confirm File Deletion',
+            f'Are you sure you want to PERMANENTLY DELETE {len(files_to_remove)} file(s) from disk?\n\nThis action cannot be undone!',
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+
+        if reply == QMessageBox.No:
+            return
+
+        # Delete files from disk
+        deleted_count = 0
+        failed_files = []
+        rows_to_remove = []
+
+        for file_info in files_to_remove:
+            try:
+                os.remove(file_info['path'])
+                rows_to_remove.append(file_info['row'])
+                deleted_count += 1
+                self.log_output.append(f'<span style="color:green;">✅ Deleted: {file_info["filename"]}</span>')
+            except Exception as e:
+                failed_files.append(file_info['filename'])
+                self.log_output.append(f'<span style="color:red;">❌ Failed to delete {file_info["filename"]}: {e}</span>')
+
+        # Remove rows from table
+        for row in sorted(rows_to_remove, reverse=True):
+            self.batch_file_table.removeRow(row)
+
+        # Update file list and row indices
+        self.batch_file_list = [f for f in self.batch_file_list if f['row'] not in rows_to_remove]
+        for i, file_info in enumerate(self.batch_file_list):
+            file_info['row'] = i
+
+        # Update status
+        if failed_files:
+            self.batch_status_label.setText(f"Deleted {deleted_count} files, {len(failed_files)} failed")
+        else:
+            self.batch_status_label.setText(f"Successfully deleted {deleted_count} files")
+
+        # Refresh the main file dropdown
+        self.refresh_h5_files()
+
+    def _batch_view_try(self, file_path):
+        """View try reconstruction for a specific file"""
+        # Set the file in the main dropdown
+        index = self.proj_file_box.findData(file_path)
+        if index >= 0:
+            self.proj_file_box.setCurrentIndex(index)
+        else:
+            # File not in dropdown, refresh and try again
+            self.refresh_h5_files()
+            index = self.proj_file_box.findData(file_path)
+            if index >= 0:
+                self.proj_file_box.setCurrentIndex(index)
+
+        # Call the existing view try method
+        self.view_try_reconstruction()
+
+    def _batch_view_full(self, file_path):
+        """View full reconstruction for a specific file"""
+        # Set the file in the main dropdown
+        index = self.proj_file_box.findData(file_path)
+        if index >= 0:
+            self.proj_file_box.setCurrentIndex(index)
+        else:
+            # File not in dropdown, refresh and try again
+            self.refresh_h5_files()
+            index = self.proj_file_box.findData(file_path)
+            if index >= 0:
+                self.proj_file_box.setCurrentIndex(index)
+
+        # Call the existing view full method
+        self.view_full_reconstruction()
+
+    def _batch_run_try_single(self, file_path):
+        """Run try reconstruction on a single file"""
+        # Set the file in the main dropdown
+        index = self.proj_file_box.findData(file_path)
+        if index >= 0:
+            self.proj_file_box.setCurrentIndex(index)
+        else:
+            self.refresh_h5_files()
+            index = self.proj_file_box.findData(file_path)
+            if index >= 0:
+                self.proj_file_box.setCurrentIndex(index)
+
+        # Update status in batch table
+        for file_info in self.batch_file_list:
+            if file_info['path'] == file_path:
+                file_info['status_item'].setText('Running Try...')
+                break
+
+        # Call the existing try reconstruction method
+        self.try_reconstruction()
+
+        # Update status
+        for file_info in self.batch_file_list:
+            if file_info['path'] == file_path:
+                file_info['status_item'].setText('Try Complete')
+                break
+
+    def _batch_run_full_single(self, file_path):
+        """Run full reconstruction on a single file"""
+        # Set the file in the main dropdown
+        index = self.proj_file_box.findData(file_path)
+        if index >= 0:
+            self.proj_file_box.setCurrentIndex(index)
+        else:
+            self.refresh_h5_files()
+            index = self.proj_file_box.findData(file_path)
+            if index >= 0:
+                self.proj_file_box.setCurrentIndex(index)
+
+        # Update status in batch table
+        for file_info in self.batch_file_list:
+            if file_info['path'] == file_path:
+                file_info['status_item'].setText('Running Full...')
+                break
+
+        # Call the existing full reconstruction method
+        self.full_reconstruction()
+
+        # Update status
+        for file_info in self.batch_file_list:
+            if file_info['path'] == file_path:
+                file_info['status_item'].setText('Full Complete')
+                break
+
+    def _batch_run_try_selected(self):
+        """Run try reconstruction on all selected files"""
+        selected_files = [f for f in self.batch_file_list if f['checkbox'].isChecked()]
+
+        if not selected_files:
+            QMessageBox.warning(self, "Warning", "No files selected.")
+            return
+
+        reply = QMessageBox.question(
+            self, 'Confirm Batch Try',
+            f'Run try reconstruction on {len(selected_files)} selected files?',
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+
+        if reply == QMessageBox.No:
+            return
+
+        self.batch_running = True
+        self.batch_current_index = 0
+        total = len(selected_files)
+
+        for i, file_info in enumerate(selected_files):
+            self.batch_current_index = i + 1
+            progress = int((i / total) * 100)
+            self.batch_progress_bar.setValue(progress)
+            self.batch_status_label.setText(f"Processing {i+1}/{total}: {file_info['filename']}")
+
+            file_info['status_item'].setText('Running Try...')
+            QApplication.processEvents()
+
+            # Set file and run
+            index = self.proj_file_box.findData(file_info['path'])
+            if index >= 0:
+                self.proj_file_box.setCurrentIndex(index)
+                self.try_reconstruction()
+                file_info['status_item'].setText('Try Complete')
+            else:
+                file_info['status_item'].setText('Error: File not found')
+
+            QApplication.processEvents()
+
+        self.batch_progress_bar.setValue(100)
+        self.batch_status_label.setText(f"Batch try complete: {total} files processed")
+        self.batch_running = False
+
+    def _batch_run_full_selected(self):
+        """Run full reconstruction on all selected files"""
+        selected_files = [f for f in self.batch_file_list if f['checkbox'].isChecked()]
+
+        if not selected_files:
+            QMessageBox.warning(self, "Warning", "No files selected.")
+            return
+
+        reply = QMessageBox.question(
+            self, 'Confirm Batch Full Reconstruction',
+            f'Run full reconstruction on {len(selected_files)} selected files?\nThis may take a long time.',
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+
+        if reply == QMessageBox.No:
+            return
+
+        self.batch_running = True
+        self.batch_current_index = 0
+        total = len(selected_files)
+
+        for i, file_info in enumerate(selected_files):
+            self.batch_current_index = i + 1
+            progress = int((i / total) * 100)
+            self.batch_progress_bar.setValue(progress)
+            self.batch_status_label.setText(f"Processing {i+1}/{total}: {file_info['filename']}")
+
+            file_info['status_item'].setText('Running Full...')
+            QApplication.processEvents()
+
+            # Set file and run
+            index = self.proj_file_box.findData(file_info['path'])
+            if index >= 0:
+                self.proj_file_box.setCurrentIndex(index)
+                self.full_reconstruction()
+                file_info['status_item'].setText('Full Complete')
+            else:
+                file_info['status_item'].setText('Error: File not found')
+
+            QApplication.processEvents()
+
+        self.batch_progress_bar.setValue(100)
+        self.batch_status_label.setText(f"Batch full reconstruction complete: {total} files processed")
+        self.batch_running = False
+
+    # ===== THEME METHODS =====
+
+    def _toggle_theme(self):
+        """Toggle between bright and dark themes"""
+        self.theme_manager.toggle_theme()
+
+    def _on_theme_changed(self, theme_name):
+        """Callback when theme changes - update UI elements"""
+        # Update theme toggle button icon
+        if theme_name == 'bright':
+            self.theme_toggle_btn.setText("🌙")
+        else:
+            self.theme_toggle_btn.setText("☀")
+
+        # Redraw the matplotlib canvas with new theme
+        if hasattr(self, 'canvas') and self.canvas:
+            self.canvas.draw_idle()
 
 
 if __name__ == "__main__":

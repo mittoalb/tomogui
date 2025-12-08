@@ -26,4 +26,4 @@ tomogui = "tomogui.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-tomogui = ["styles/*.mplstyle"]
+tomogui = ["styles/*.mplstyle", "styles/*.py"]
