@@ -3383,6 +3383,8 @@ class TomoGUI(QWidget):
         # Clear existing table
         self.batch_file_table.setRowCount(0)
         self.batch_file_list = []
+        # Reset last clicked row to avoid stale row references
+        self.batch_last_clicked_row = None
 
         # Populate table
         for file_path in h5_files:
