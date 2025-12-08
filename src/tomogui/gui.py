@@ -3380,7 +3380,8 @@ class TomoGUI(QWidget):
                 # Widget may have been deleted
                 pass
 
-        # Clear existing table
+        # Clear existing table - disable sorting first to avoid issues
+        self.batch_file_table.setSortingEnabled(False)
         self.batch_file_table.setRowCount(0)
         self.batch_file_list = []
         # Reset last clicked row to avoid stale row references
@@ -3475,6 +3476,9 @@ class TomoGUI(QWidget):
             actions_layout.addWidget(full_btn)
 
             self.batch_file_table.setCellWidget(row, 8, actions_widget)
+
+        # Re-enable sorting after populating the table
+        self.batch_file_table.setSortingEnabled(True)
 
         self.batch_status_label.setText(f"Loaded {len(h5_files)} files")
 
