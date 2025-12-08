@@ -3806,6 +3806,10 @@ class TomoGUI(QWidget):
         # Add jobs to queue with their type and machine info
         jobs_to_add = [(f, recon_type, machine) for f in selected_files]
 
+        # Mark all jobs as queued
+        for f, _, _ in jobs_to_add:
+            f['status_item'].setText('Queued')
+
         # If queue is already running, just add to it
         if self.batch_running:
             self.batch_job_queue.extend(jobs_to_add)
@@ -3828,6 +3832,7 @@ class TomoGUI(QWidget):
 
         self.batch_status_label.setText(f"Starting batch queue on {machine} with {num_gpus} GPU(s)")
         self.batch_progress_bar.setValue(0)
+        self.log_output.append(f'<span style="color:green;">🔧 Queue started with {num_gpus} GPU(s): {self.batch_available_gpus}</span>')
         QApplication.processEvents()
 
         # Keep processing until queue is empty and all jobs are done
@@ -3839,7 +3844,7 @@ class TomoGUI(QWidget):
                 file_info, job_recon_type, job_machine = job_tuple
 
                 # Update status
-                file_info['status_item'].setText(f'Running {job_recon_type} on GPU {gpu_id}...')
+                file_info['status_item'].setText(f'Running on GPU {gpu_id}')
                 queue_len = len(self.batch_job_queue)
                 self.batch_queue_label.setText(f"Queue: {len(self.batch_job_queue)} jobs waiting")
                 QApplication.processEvents()
@@ -3848,7 +3853,7 @@ class TomoGUI(QWidget):
                 process = self._start_batch_job_async(file_info, job_recon_type, gpu_id, job_machine)
                 self.batch_running_jobs[gpu_id] = (process, file_info, job_recon_type)
 
-                self.log_output.append(f'🚀 Started {job_recon_type} on GPU {gpu_id}: {file_info["filename"]}')
+                self.log_output.append(f'<span style="color:blue;">🚀 GPU {gpu_id}: Started {job_recon_type} - {file_info["filename"]} (Running: {len(self.batch_running_jobs)}, Queued: {len(self.batch_job_queue)})</span>')
 
             # Check for completed jobs
             completed_gpus = []
@@ -3879,8 +3884,13 @@ class TomoGUI(QWidget):
             else:
                 progress = 0
             self.batch_progress_bar.setValue(progress)
+
+            # Show which GPUs are active
+            active_gpus = sorted(self.batch_running_jobs.keys())
+            gpu_status = f"GPUs: {active_gpus}" if active_gpus else "GPUs: idle"
+
             self.batch_status_label.setText(
-                f"Completed {self.batch_completed_jobs}/{self.batch_total_jobs} | Running: {len(self.batch_running_jobs)} | Queue: {len(self.batch_job_queue)}"
+                f"Completed {self.batch_completed_jobs}/{self.batch_total_jobs} | {gpu_status} ({len(self.batch_running_jobs)} running) | Queue: {len(self.batch_job_queue)}"
             )
 
             QApplication.processEvents()
