@@ -3003,7 +3003,7 @@ class TomoGUI(QWidget):
 
         # Set black background for the plot area
         self.ax.set_facecolor('black')
-        self.figure.patch.set_facecolor('black')
+        self.fig.patch.set_facecolor('black')
 
         self.ax.set_aspect('equal', adjustable='box')  # square pixels; obey zoom limits without warnings
         if (self._keep_zoom and
