@@ -2706,6 +2706,9 @@ class TomoGUI(QWidget):
             pass
         self.slice_slider.setMaximum(self.raw_files_num - 1)
         self.slice_slider.valueChanged.connect(self.update_raw_slice)
+        # Store the source filename for display
+        self._current_source_file = os.path.basename(raw_fn)
+        self._current_view_mode = "raw"
         self.update_raw_slice()
 
     def view_try_reconstruction(self):
@@ -2727,6 +2730,9 @@ class TomoGUI(QWidget):
             pass
         self.slice_slider.setMaximum(len(self.preview_files) - 1)
         self.slice_slider.valueChanged.connect(self.update_try_slice)
+        # Store the source filename for display
+        self._current_source_file = os.path.basename(proj_file)
+        self._current_view_mode = "try"
         self.update_try_slice()
 
     def view_full_reconstruction(self):
@@ -2749,6 +2755,9 @@ class TomoGUI(QWidget):
             pass
         self.slice_slider.setMaximum(len(self.full_files) - 1)
         self.slice_slider.valueChanged.connect(self.update_full_slice)
+        # Store the source filename for display
+        self._current_source_file = os.path.basename(proj_file)
+        self._current_view_mode = "full"
         self.update_full_slice()
 
     def set_image_scale(self, img_path, flag=None):
@@ -2984,7 +2993,13 @@ class TomoGUI(QWidget):
             origin="upper",
             extent=[0, w, h, 0]
         )
-        self.ax.set_title(os.path.basename(str(img_path)), pad=5.5)
+
+        # Build title with source filename
+        if hasattr(self, '_current_source_file') and hasattr(self, '_current_view_mode'):
+            title = f"{self._current_source_file} [{self._current_view_mode}] - {os.path.basename(str(img_path))}"
+        else:
+            title = os.path.basename(str(img_path))
+        self.ax.set_title(title, pad=5.5, fontsize=10)
         self.ax.set_aspect('equal', adjustable='box')  # square pixels; obey zoom limits without warnings
         if (self._keep_zoom and
             self._last_image_shape == (h, w) and
