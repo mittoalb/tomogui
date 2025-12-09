@@ -1751,16 +1751,19 @@ class TomoGUI(QWidget):
         self.batch_file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.batch_file_table.setSortingEnabled(True)  # Enable column sorting
         header = self.batch_file_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(8, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Select checkbox
+        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Filename - user can resize
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Size
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # COR
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Status
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # View Data
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # View Try
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # View Full
+        header.setSectionResizeMode(8, QHeaderView.ResizeToContents)  # Actions
         header.setSectionsClickable(True)  # Make headers clickable for sorting
+
+        # Set initial width for filename column to be wider (can be resized by user)
+        self.batch_file_table.setColumnWidth(1, 400)
 
         main_layout.addWidget(self.batch_file_table)
 
@@ -3435,8 +3438,10 @@ class TomoGUI(QWidget):
             self.batch_file_table.setCellWidget(row, 0, checkbox_widget)
             file_info['checkbox'] = checkbox
 
-            # Filename
-            self.batch_file_table.setItem(row, 1, QTableWidgetItem(filename))
+            # Filename - show full name and set tooltip with full path
+            filename_item = QTableWidgetItem(filename)
+            filename_item.setToolTip(f"{filename}\n\nFull path:\n{file_path}")
+            self.batch_file_table.setItem(row, 1, filename_item)
 
             # File size
             try:
