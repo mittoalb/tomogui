@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
     QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
 )
 from PyQt5.QtCore import Qt, QEvent, QProcess, QEventLoop, QSize, QProcessEnvironment
+from PyQt5.QtGui import QColor
 
 from PIL import Image
 from matplotlib.widgets import RectangleSelector
@@ -3443,17 +3444,35 @@ class TomoGUI(QWidget):
         self.batch_last_clicked_row = None
 
         # Populate table
+        data_folder = self.data_path.text().strip()
         for file_path in h5_files:
             filename = os.path.basename(file_path)
             row = self.batch_file_table.rowCount()
             self.batch_file_table.insertRow(row)
+
+            # Check reconstruction status
+            proj_name = os.path.splitext(filename)[0]
+            try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
+            full_dir = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec")
+
+            has_try = os.path.isdir(try_dir) and len(glob.glob(os.path.join(try_dir, "*.tiff"))) > 0
+            has_full = os.path.isdir(full_dir) and len(glob.glob(os.path.join(full_dir, "*.tiff"))) > 0
+
+            # Determine row color based on reconstruction status
+            if has_full:
+                row_color = "green"  # Full reconstruction exists
+            elif has_try:
+                row_color = "orange"  # Only try reconstruction exists
+            else:
+                row_color = "red"  # No reconstruction
 
             # Store file info
             file_info = {
                 'path': file_path,
                 'filename': filename,
                 'status': 'Ready',
-                'row': row
+                'row': row,
+                'recon_status': row_color
             }
             self.batch_file_list.append(file_info)
 
@@ -3533,6 +3552,16 @@ class TomoGUI(QWidget):
             actions_layout.addWidget(full_btn)
 
             self.batch_file_table.setCellWidget(row, 8, actions_widget)
+
+            # Apply colored background based on reconstruction status
+            # Green for full, orange for try only, red for none
+            bg_color = QColor(row_color).lighter(170)  # Lighten the color for better readability
+
+            # Apply background color to all items in the row
+            for col in [1, 2, 4]:  # Filename, Size, Status columns
+                item = self.batch_file_table.item(row, col)
+                if item:
+                    item.setBackground(bg_color)
 
         # Re-enable sorting after populating the table
         self.batch_file_table.setSortingEnabled(True)
