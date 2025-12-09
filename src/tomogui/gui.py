@@ -1946,6 +1946,8 @@ class TomoGUI(QWidget):
         if dialog.exec():
             self.data_path.setText(dialog.selectedFiles()[0])
             self.refresh_h5_files()
+            # Auto-refresh batch file list when folder is selected
+            self._refresh_batch_file_list()
 
     def refresh_h5_files(self):
         self.proj_file_box.clear()
@@ -2994,16 +2996,24 @@ class TomoGUI(QWidget):
             extent=[0, w, h, 0]
         )
 
-        # Build title with source filename - LARGE and VISIBLE with WHITE text on BLACK background
+        # Build title with source filename - LARGE and VISIBLE
         if hasattr(self, '_current_source_file') and hasattr(self, '_current_view_mode'):
             title = f"{self._current_source_file} [{self._current_view_mode}] - {os.path.basename(str(img_path))}"
         else:
             title = os.path.basename(str(img_path))
-        self.ax.set_title(title, pad=15, fontsize=16, fontweight='bold', color='white')
 
-        # Set black background for the plot area
-        self.ax.set_facecolor('black')
-        self.fig.patch.set_facecolor('black')
+        # Adapt title color and background to current theme
+        current_theme = self.theme_manager.get_current_theme()
+        if current_theme == 'dark':
+            title_color = 'white'
+            bg_color = 'black'
+        else:
+            title_color = 'black'
+            bg_color = 'white'
+
+        self.ax.set_title(title, pad=15, fontsize=16, fontweight='bold', color=title_color)
+        self.ax.set_facecolor(bg_color)
+        self.fig.patch.set_facecolor(bg_color)
 
         self.ax.set_aspect('equal', adjustable='box')  # square pixels; obey zoom limits without warnings
         if (self._keep_zoom and
