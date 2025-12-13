@@ -3474,14 +3474,19 @@ class TomoGUI(QWidget):
         # Get all .h5 files
         h5_files = sorted(glob.glob(os.path.join(folder, "*.h5")), key=os.path.getmtime, reverse=True)
 
-        # Save current COR values before clearing (to preserve user input)
+        # Save current COR values and checkbox states before clearing (to preserve user input)
         cor_values = {}
+        checkbox_states = {}
         for file_info in self.batch_file_list:
             try:
                 filename = file_info['filename']
                 cor_val = file_info['cor_input'].text().strip()
                 if cor_val:
                     cor_values[filename] = cor_val
+                # Save checkbox state
+                is_checked = file_info['checkbox'].isChecked()
+                if is_checked:
+                    checkbox_states[filename] = True
             except (KeyError, RuntimeError):
                 # Widget may have been deleted
                 pass
@@ -3529,6 +3534,9 @@ class TomoGUI(QWidget):
             # Checkbox for selection with shift-click support
             checkbox = QCheckBox()
             checkbox.clicked.connect(lambda checked, r=row: self._batch_checkbox_clicked(r, checked))
+            # Restore checkbox state if it was previously checked
+            if filename in checkbox_states:
+                checkbox.setChecked(True)
             checkbox_widget = QWidget()
             checkbox_layout = QHBoxLayout(checkbox_widget)
             checkbox_layout.addWidget(checkbox)
@@ -3617,9 +3625,18 @@ class TomoGUI(QWidget):
         if not cor_values:
             self._batch_load_cor_csv(silent=True)
         else:
-            # Count how many COR values were restored
-            restored_count = len(cor_values)
-            self.batch_status_label.setText(f"Loaded {len(h5_files)} files ({restored_count} with COR values)")
+            # Count how many COR values and selections were restored
+            restored_cor_count = len(cor_values)
+            restored_sel_count = len(checkbox_states)
+            status_parts = []
+            if restored_cor_count > 0:
+                status_parts.append(f"{restored_cor_count} with COR values")
+            if restored_sel_count > 0:
+                status_parts.append(f"{restored_sel_count} selected")
+            if status_parts:
+                self.batch_status_label.setText(f"Loaded {len(h5_files)} files ({', '.join(status_parts)})")
+            else:
+                self.batch_status_label.setText(f"Loaded {len(h5_files)} files")
 
     def _batch_save_cor_csv(self):
         """Save COR values to CSV file in the data directory"""
