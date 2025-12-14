@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QTextEdit, QLineEdit, QLabel, QProgressBar,
     QComboBox, QSlider, QGroupBox, QSizePolicy, QMessageBox,
     QTabWidget, QFormLayout, QCheckBox, QSpinBox, QDoubleSpinBox,
-    QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
+    QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,QFrame
 )
 from PyQt5.QtCore import Qt, QEvent, QProcess, QEventLoop, QSize, QProcessEnvironment
 from PyQt5.QtGui import QColor
@@ -40,7 +40,7 @@ class TomoGUI(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("TomoGUI")
-        self.resize(1650, 950)
+        self.resize(2048,1080)
 
         # Initialize theme manager (will apply theme after UI is built)
         self.theme_manager = ThemeManager()
@@ -57,6 +57,9 @@ class TomoGUI(QWidget):
         self._current_img = None
         self._current_img_path = None
         self.cor_data = {}
+        self.batch_running = False
+        self.batch_file_list = []
+        self.highlight_scan = None
 
         # Batch selection state for shift-click
         self.batch_last_clicked_row = None
@@ -68,83 +71,302 @@ class TomoGUI(QWidget):
 
         # Data folder
         folder_layout = QHBoxLayout()
+        df_label = QLabel("Data Folder:")
+        df_label.setStyleSheet("QLabel { font-size: 10.5pt; }")
+        folder_layout.addWidget(df_label)
         self.data_path = QLineEdit()
-        browse_btn = QPushButton("Browse Data Folder")
-        browse_btn.clicked.connect(self.browse_data_folder)
-        folder_layout.addWidget(QLabel("Data Folder:"))
+        self.data_path.setFixedWidth(580)
+        self.data_path.setStyleSheet("QLineEdit { font-size: 10.5pt; }")
         folder_layout.addWidget(self.data_path)
+        browse_btn = QPushButton(" Browse Data Folder ")
+        browse_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        browse_btn.clicked.connect(self.browse_data_folder)
         folder_layout.addWidget(browse_btn)
+        refresh_btn2 = QPushButton("     Refresh     ")
+        refresh_btn2.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        refresh_btn2.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        refresh_btn2.clicked.connect(self.refresh_main_table)      
+        folder_layout.addWidget(refresh_btn2)  
         left_layout.addLayout(folder_layout)
 
         # Projection file
-        proj_layout = QHBoxLayout()
-        self.proj_file_box = QComboBox()
-        self.proj_file_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        proj_layout.addWidget(QLabel("Projection File:"))
-        proj_layout.addWidget(self.proj_file_box)
-        refresh_btn2 = QPushButton("Refresh")
-        refresh_btn2.clicked.connect(self.refresh_h5_files)
-        proj_layout.addWidget(refresh_btn2)
-        left_layout.addLayout(proj_layout)
-
-        # recon/recon_step + Rotation axis method + input guess COR + config buttons
-        #cor_layout = QHBoxLayout()
-
-        '''
-        #======================original method=========================
-        self.recon_way_box = QComboBox()
-        self.recon_way_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.recon_way_box.addItems(["recon","recon_steps"])
-        self.recon_way_box.setCurrentIndex(0) # make recon as default
-        cor_layout.addWidget(self.recon_way_box)
-
-        cor_layout.addWidget(QLabel("COR method"))
-        self.cor_method_box = QComboBox()
-        self.cor_method_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.cor_method_box.addItems(["auto","manual"])
-        self.cor_method_box.setCurrentIndex(1) # make manual as default
-        cor_layout.addWidget(self.cor_method_box)
-
-        self.cor_input = QLineEdit()
-        cor_layout.addWidget(QLabel("COR:"))
-        cor_layout.addWidget(self.cor_input)
-        
-        load_config_btn = QPushButton("Load Config")
-        save_config_btn = QPushButton("Save Config")
-        load_config_btn.clicked.connect(self.load_config)
-        save_config_btn.clicked.connect(self.save_config)
-        cor_layout.addWidget(load_config_btn)
-        cor_layout.addWidget(save_config_btn)
-        '''
-        #view_prj_btn = QPushButton("View raw")
-        #view_prj_btn.clicked.connect(self.view_raw)
-        #cor_layout.addWidget(view_prj_btn)
-
-        #help_tomo_btn = QPushButton("help")
-        #help_tomo_btn.clicked.connect(self.help_tomo)
-        #cor_layout.addWidget(help_tomo_btn)
-
-        #abort_btn = QPushButton("Abort")
-        #abort_btn.clicked.connect(self.abort_process)
-        #abort_btn.setStyleSheet("color: red;")
-        #cor_layout.addWidget(abort_btn)
-        #left_layout.addLayout(cor_layout)
+        #proj_layout = QHBoxLayout()
+        #self.proj_file_box = QComboBox()
+        #self.proj_file_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        #proj_layout.addWidget(QLabel("Projection File:"))
+        #proj_layout.addWidget(self.proj_file_box)
+        #refresh_btn2 = QPushButton("Refresh")
+        #refresh_btn2.clicked.connect(self.refresh_h5_files)
+        #proj_layout.addWidget(refresh_btn2)
+        #left_layout.addLayout(proj_layout)
 
         # ==== TABS (Configs + Params) ====
         self.tabs = QTabWidget()
-        left_layout.addWidget(self.tabs)
-
-        # Tab 1: Configs (contains two existing config editors)
+        left_layout.addWidget(self.tabs)        
+        
         first_tab = QWidget()
-        #configs_v = QVBoxLayout(configs_tab)
-        #self._config_frame_layout = QHBoxLayout()
-        #configs_v.addLayout(self._config_frame_layout)
         self.tabs.addTab(first_tab, "Main")
 
         #==========main tab may===================
         main_tab = QVBoxLayout(first_tab)
+        main_tab.setSpacing(6)
+        #Row 1 - Try part single file operation
+        single_ops = QHBoxLayout()
+        single_ops.setSpacing(10)
+        label_try = QLabel("Try method")
+        label_try.setStyleSheet("QLabel { font-size: 10.5pt; }")
+        label_try.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        single_ops.addWidget(label_try)
+        self.recon_way_box = QComboBox()
+        self.recon_way_box.setFixedWidth(100)
+        self.recon_way_box.setStyleSheet("QComboBox { font-size: 10.5pt; }")
+        self.recon_way_box.addItems(["recon","recon_steps"])
+        self.recon_way_box.setCurrentIndex(0) # make recon as default
+        single_ops.addWidget(self.recon_way_box)
+        cor_method_label = QLabel("COR method")
+        cor_method_label.setStyleSheet("QLabel { font-size: 10.5pt; }")
+        single_ops.addWidget(cor_method_label)
+        self.cor_method_box = QComboBox()
+        self.cor_method_box.setFixedWidth(85)
+        self.cor_method_box.setStyleSheet("QComboBox { font-size: 10.5pt; }")
+        self.cor_method_box.addItems(["auto","manual"])
+        self.cor_method_box.setCurrentIndex(1) # make manual as default
+        single_ops.addWidget(self.cor_method_box)
+        cor_label = QLabel("COR")
+        cor_label.setStyleSheet("QLabel { font-size: 10.5pt; }")
+        single_ops.addWidget(cor_label)
+        self.cor_input = QLineEdit()
+        self.cor_input.setFixedWidth(55)
+        self.cor_input.setStyleSheet("QLineEdit { font-size: 10.5pt; }")
+        single_ops.addWidget(self.cor_input)
+        cuda_label = QLabel("cuda")
+        cuda_label.setStyleSheet("QLabel { font-size: 10.5pt; }")
+        single_ops.addWidget(cuda_label)
+        self.cuda_box_try = QSpinBox()
+        self.cuda_box_try.setMinimum(0)
+        self.cuda_box_try.setMaximum(1)
+        self.cuda_box_try.setValue(0)
+        self.cuda_box_try.setFixedWidth(52)
+        self.cuda_box_try.setStyleSheet("QSpinBox { font-size: 10.5pt; }")
+        single_ops.addWidget(self.cuda_box_try)
+        try_btn = QPushButton("  Try  ")
+        try_btn.setStyleSheet("QPushButton { font-size: 11pt; font-weight:bold; }")
+        try_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        try_btn.clicked.connect(self.try_reconstruction)
+        single_ops.addWidget(try_btn)
+        view_try_btn = QPushButton("  View Try  ")
+        view_try_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        view_try_btn.clicked.connect(self.view_try_reconstruction)
+        single_ops.addWidget(view_try_btn)
+        single_ops.setStretch(0,0)
+        separator = QLabel(" | ")
+        separator.setStyleSheet("QLabel { font-size: 11pt; }")
+        single_ops.addWidget(separator)
+        clear_log_btn = QPushButton(" clear Log ")
+        clear_log_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        clear_log_btn.setEnabled(True) #enable
+        clear_log_btn.clicked.connect(self.clear_log)
+        single_ops.addWidget(clear_log_btn)
+        main_tab.addLayout(single_ops)
+
+        h_line = QFrame()
+        h_line.setFrameShape(QFrame.HLine)  # Vertical line
+        h_line.setFrameShadow(QFrame.Sunken)
+        main_tab.addWidget(h_line)
+        
+        # Row 2 - Full part single file operation
+        single_full_ops = QHBoxLayout()
+        single_full_ops.setSpacing(10)
+        label_full = QLabel("Full method")
+        label_full.setStyleSheet("QLabel { font-size: 10.5pt; }")
+        label_full.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        single_full_ops.addWidget(label_full)
+        self.recon_way_box_full = QComboBox()
+        self.recon_way_box_full.setFixedWidth(99)
+        self.recon_way_box_full.setStyleSheet("QComboBox { font-size: 10.5pt; }")
+        self.recon_way_box_full.addItems(["recon","recon_steps"])
+        self.recon_way_box_full.setCurrentIndex(0) # make recon as default
+        single_full_ops.addWidget(self.recon_way_box_full)
+        cor_method_full_label = QLabel("COR method")
+        cor_method_full_label.setStyleSheet("QLabel { font-size: 10.5pt; }")
+        single_full_ops.addWidget(cor_method_full_label)
+        self.cor_full_method = QComboBox()
+        self.cor_full_method.setFixedWidth(85)
+        self.cor_full_method.setStyleSheet("QComboBox { font-size: 10.5pt; }")
+        self.cor_full_method.addItems(["auto","manual"])
+        self.cor_full_method.setCurrentIndex(1) # make manual as default
+        single_full_ops.addWidget(self.cor_full_method)
+        #TODO: link to the the COR shown in right side figure
+        rec_cor_btn = QPushButton("  Add COR  ")
+        rec_cor_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        rec_cor_btn.clicked.connect(self.record_cor_to_json)#TODO: needs to modify function to make the value show in table
+        single_full_ops.addWidget(rec_cor_btn)
+        cuda_full_label = QLabel("cuda")
+        cuda_full_label.setStyleSheet("QLabel { font-size: 10.5pt; }")
+        single_full_ops.addWidget(cuda_full_label)
+        self.cuda_full_box = QSpinBox()
+        self.cuda_full_box.setMinimum(0)
+        self.cuda_full_box.setMaximum(1)
+        self.cuda_full_box.setValue(0)
+        self.cuda_full_box.setFixedWidth(52)
+        self.cuda_full_box.setStyleSheet("QSpinBox { font-size: 10.5pt; }")
+        single_full_ops.addWidget(self.cuda_full_box) 
+        full_btn = QPushButton("    Full    ")
+        full_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        full_btn.setStyleSheet("QPushButton { font-size: 11pt; font-weight:bold; }")
+        full_btn.clicked.connect(self.full_reconstruction)
+        single_full_ops.addWidget(full_btn)
+        self.view_btn = QPushButton("  View Full  ")
+        self.view_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        self.view_btn.setEnabled(True)
+        self.view_btn.clicked.connect(self.view_full_reconstruction)
+        single_full_ops.addWidget(self.view_btn)
+        separator_full = QLabel(" | ")
+        separator_full.setStyleSheet("QLabel { font-size: 11pt; }")
+        single_full_ops.addWidget(separator_full)
+        save_log_btn = QPushButton(" save Log ")
+        save_log_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        save_log_btn.setEnabled(True) #enable
+        save_log_btn.clicked.connect(self.save_log)
+        single_full_ops.addWidget(save_log_btn)
+        main_tab.addLayout(single_full_ops)
+
+
+        h_line2 = QFrame()
+        h_line2.setFrameShape(QFrame.HLine)  # Vertical line
+        h_line2.setFrameShadow(QFrame.Sunken)
+        main_tab.addWidget(h_line2)
+
+        # Row 3: some helpful functions
+        others_ops = QHBoxLayout()
+        others_ops.setSpacing(5)
+        view_prj_btn = QPushButton("View raw")
+        view_prj_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        view_prj_btn.clicked.connect(self.view_raw) #TODO: needs to modify function to make the value show in table
+        others_ops.addWidget(view_prj_btn)
+        view_meta_btn = QPushButton("meta")
+        view_meta_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        view_meta_btn.setEnabled(False) #disable TODO
+        #view_meta_btn.clicked.connect(self.view_metadata) #TODO: needs to modify with alrady have functions in Batch Processing tab
+        others_ops.addWidget(view_meta_btn)
+        save_param_btn = QPushButton("Save params")
+        save_param_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        save_param_btn.setEnabled(True) #enable
+        save_param_btn.clicked.connect(self.save_params_to_file)
+        others_ops.addWidget(save_param_btn)
+        load_param_btn = QPushButton("Load params")
+        load_param_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        load_param_btn.setEnabled(True) #enable
+        load_param_btn.clicked.connect(self.load_params_from_file)    
+        others_ops.addWidget(load_param_btn)
+        abort_btn =QPushButton("Abort")
+        abort_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        abort_btn.clicked.connect(self.abort_process)
+        abort_btn.setStyleSheet("color: red;")
+        others_ops.addWidget(abort_btn)
+        help_tomo_btn = QPushButton("help")
+        help_tomo_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        help_tomo_btn.clicked.connect(self.help_tomo)
+        help_tomo_btn.setStyleSheet("color: green;")
+        others_ops.addWidget(help_tomo_btn)
+        main_tab.addLayout(others_ops)
+
+        # Row 4 - batch process table
+        self.batch_file_main_table = QTableWidget()
+        self.batch_file_main_table.cellClicked.connect(self.on_table_row_clicked)
+        self.batch_file_main_table.setStyleSheet("""
+                                            QTableWidget {
+                                             font-size: 10.5pt; /* Set font size for the table cells */
+                                            }
+                                            QHeaderView::section {
+                                                font-size: 10.5pt; /* Set font size for the header */
+                                                font-weight: bold; /* Make header text bold */
+                                                }
+                                                """)
+        self.batch_file_main_table.setColumnCount(6)
+        self.batch_file_main_table.setHorizontalHeaderLabels(["Select","File Name", "COR", 
+                                                         "Status", "Size", "Actions"])
+        self.batch_file_main_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.batch_file_main_table.setSortingEnabled(True)  # Enable column sorting
+        header = self.batch_file_main_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Interactive)  # Allow user to resize columns
+        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Select checkbox
+        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Filename - user can resize
+        header.setSectionResizeMode(2, QHeaderView.Stretch)  # COR
+        header.setSectionResizeMode(3, QHeaderView.Stretch)  # Status
+        header.setSectionResizeMode(4, QHeaderView.Stretch)  # Size
+        header.setSectionResizeMode(5, QHeaderView.Stretch)  # Actions
+        header.setSectionsClickable(True)  # Make headers clickable for sorting
+        self.batch_file_main_table.setColumnWidth(1, 350) # Set initial width for filename column to be wider (can be resized by user)    
+        main_tab.addWidget(self.batch_file_main_table)
+        #Row 5: batch process operations
+        batch_ops = QHBoxLayout()
+        batch_ops.setSpacing(5)
+        batch_label = QLabel("Batch process")
+        batch_label.setStyleSheet("QLabel { font-size: 10.5pt; font-weight:bold; }")
+        batch_ops.addWidget(batch_label)
+        batch_mach = QLabel("machine")
+        batch_mach.setStyleSheet("QLabel { font-size: 10.5pt; }")
+        batch_ops.addWidget(batch_mach)
+        self.batch_machine_box = QComboBox()
+        self.batch_machine_box.addItems(["Local", "tomo1", "tomo2", "tomo3", "tomo4", "tomo5"])
+        self.batch_machine_box.setStyleSheet("QComboBox { font-size: 10.5pt; }")
+        self.batch_machine_box.setCurrentText("Local") # make Local as default TODO: set initial json file beamline dependent
+        self.batch_machine_box.setToolTip("Select machine to run batch reconstructions")
+        self.batch_machine_box.setFixedWidth(62)
+        batch_ops.addWidget(self.batch_machine_box)
+        batch_gpus = QLabel("GPUs")
+        batch_gpus.setStyleSheet("QLabel { font-size: 10.5pt; }")
+        batch_ops.addWidget(batch_gpus)
+        self.batch_gpus_per_machine = QSpinBox()
+        self.batch_gpus_per_machine.setMinimum(1)
+        self.batch_gpus_per_machine.setMaximum(8)
+        self.batch_gpus_per_machine.setValue(1)
+        self.batch_gpus_per_machine.setToolTip("Number of GPUs to use on the target machine (1 job per GPU)")
+        self.batch_gpus_per_machine.setFixedWidth(48)
+        self.batch_gpus_per_machine.setStyleSheet("QSpinBox { font-size: 10.5pt; }")
+        batch_ops.addWidget(self.batch_gpus_per_machine)
+        load_cor_btn = QPushButton("Load COR")
+        load_cor_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        load_cor_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        #load_cor_btn.clicked.connect(self.load_cor_to_jsonbox_batch)#TODO: needs to modify to work with table
+        batch_ops.addWidget(load_cor_btn)
+        select_all_btn = QPushButton(" Select all ")
+        select_all_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        select_all_btn.clicked.connect(self._batch_select_all)
+        batch_ops.addWidget(select_all_btn)
+        deselect_all_btn = QPushButton(" Unselect all ")
+        deselect_all_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        deselect_all_btn.clicked.connect(self._batch_deselect_all)
+        batch_ops.addWidget(deselect_all_btn)
+        separator_batch = QLabel(" | ")
+        separator_batch.setStyleSheet("QLabel { font-size: 11pt; }")
+        batch_ops.addWidget(separator_batch)
+        batch_recon_btn =QPushButton("Batch Try")
+        batch_recon_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        batch_recon_btn.setToolTip("Run batch try reconstruction on selected files,the params are from GUI and COR guess from value put on single operation above")
+        batch_recon_btn.clicked.connect(self.batch_try_reconstruction) #TODO: needs to modify to work with table
+        batch_ops.addWidget(batch_recon_btn)
+        batch_full_btn =QPushButton("Batch Full")
+        batch_full_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        batch_full_btn.setToolTip("Run batch full reconstruction on selected files,the params are from GUI and COR from Table above")
+        batch_full_btn.clicked.connect(self.batch_full_reconstruction) #TODO: needs to modify to work with table
+        batch_ops.addWidget(batch_full_btn)
+        main_tab.addLayout(batch_ops)
+        #TODO: pop up progress bar window, needs to modify batch try and full functions
+        #Row 6: process log
+        log_box = QVBoxLayout()
+        self.log_output = QTextEdit()
+        self.log_output.setReadOnly(True)
+        self.log_output.setStyleSheet("QTextEdit { font-size: 11pt; }")
+        self.log_output.append("Start tomoGUI")     
+        self.log_output.setFixedHeight(200)  # Set a fixed height
+        log_box.addWidget(self.log_output)
+        main_tab.addLayout(log_box)   
+
+        '''
         main_rows = QHBoxLayout()
-        main_rows.setSpacing(5)
+        main_rows.setSpacing(3)
         #left frame for Try
         try_box = QGroupBox("Try Reconstruction")
         try_form = QFormLayout()
@@ -320,85 +542,6 @@ class TomoGUI(QWidget):
         main_rows.addWidget(full_box,1)
         main_tab.addLayout(main_rows)
         '''
-        # Try config group
-        left_config_group = QGroupBox("Config for Try Reconstruction")
-        left_config_layout = QVBoxLayout()
-        self.config_editor_try = QTextEdit()
-        self.config_editor_try.setFixedHeight(300)
-        self.config_editor_try.setStyleSheet("QTextEdit { border: 1px solid gray; font-size: 12.5pt; }")
-        self.config_editor_try.focusInEvent = lambda event: self.highlight_editor(self.config_editor_try, event)
-        self.config_editor_try.focusOutEvent = lambda event: self.unhighlight_editor(self.config_editor_try, event)
-        left_config_layout.addWidget(self.config_editor_try)
-
-        
-        #==============original======================= left config group (buttons, no box config txt)
-        try_btn_layout = QHBoxLayout()
-        try_btn = QPushButton("Try")
-        try_btn.clicked.connect(self.try_reconstruction)
-        view_try_btn = QPushButton("View Try")
-        view_try_btn.clicked.connect(self.view_try_reconstruction)
-        batch_try_btn = QPushButton("Batch Try")
-        batch_try_btn.clicked.connect(self.batch_try_reconstruction)
-        try_btn_layout.addWidget(try_btn)
-        try_btn_layout.addWidget(view_try_btn)
-        try_btn_layout.addWidget(batch_try_btn)
-        left_config_layout.addLayout(try_btn_layout)
-
-        # Start/End for Batch Try
-        scan_range_layout = QHBoxLayout()
-        scan_range_layout.addWidget(QLabel("Start:"))
-        self.start_scan_input = QLineEdit()
-        scan_range_layout.addWidget(self.start_scan_input)
-        scan_range_layout.addWidget(QLabel("End:"))
-        self.end_scan_input = QLineEdit()
-        scan_range_layout.addWidget(self.end_scan_input)
-        left_config_layout.addLayout(scan_range_layout)
-        left_config_group.setLayout(left_config_layout)
-        
-        # Full config group
-        right_config_group = QGroupBox("Config for Full Reconstruction")
-        right_config_layout = QVBoxLayout()
-        self.config_editor_full = QTextEdit()
-        self.config_editor_full.setFixedHeight(300)
-        self.config_editor_full.setStyleSheet("QTextEdit { border: 1px solid gray; font-size: 12.5pt; }")
-        self.config_editor_full.focusInEvent = lambda event: self.highlight_editor(self.config_editor_full, event)
-        self.config_editor_full.focusOutEvent = lambda event: self.unhighlight_editor(self.config_editor_full, event)
-        right_config_layout.addWidget(self.config_editor_full)
-
-        self.active_editor = self.config_editor_try
-        #===========original=========right config group (buttons, no box config txt)
-        
-        full_btn_layout = QHBoxLayout()
-        full_btn = QPushButton("Full")
-        full_btn.clicked.connect(self.full_reconstruction)
-        self.view_btn = QPushButton("View Full")
-        self.view_btn.setEnabled(True)
-        self.view_btn.clicked.connect(self.view_full_reconstruction)
-        batch_full_btn = QPushButton("Batch Full")
-        batch_full_btn.clicked.connect(self.batch_full_reconstruction)
-        full_btn_layout.addWidget(full_btn)
-        full_btn_layout.addWidget(self.view_btn)
-        full_btn_layout.addWidget(batch_full_btn)
-        right_config_layout.addLayout(full_btn_layout)
-        
-        # COR (Full) inline
-        cor_full_layout = QHBoxLayout()
-        cor_full_layout.addWidget(QLabel("COR (Full):"))
-        self.cor_input_full = QLineEdit()
-        cor_full_layout.addWidget(self.cor_input_full)
-
-        rec_cor_btn = QPushButton("Add COR")
-        rec_cor_btn.clicked.connect(self.record_cor_to_json)
-        cor_full_layout.addWidget(rec_cor_btn)
-
-        right_config_layout.addLayout(cor_full_layout)
-
-        right_config_group.setLayout(right_config_layout)
-
-        # Place groups into "Configs" tab
-        self._config_frame_layout.addWidget(left_config_group)
-        self._config_frame_layout.addWidget(right_config_group)
-        '''
         # Tab 2: Params (all CLI flags + extra args)
         self._build_params_tab()
         self._build_rings_tab()
@@ -415,29 +558,19 @@ class TomoGUI(QWidget):
         left_layout.addWidget(self.progress)
 
         # Log + COR JSON
-        log_json_layout = QHBoxLayout()
-        log_box_layout = QVBoxLayout()
-        log_box_layout.addWidget(QLabel("Log Output:"))
-        self.log_output = QTextEdit()
-        self.log_output.setReadOnly(True)
-        self.log_output.setStyleSheet("QTextEdit { font-size: 12.5pt; }")
-        self.log_output.append("Start tomoGUI")
-        log_box_layout.addWidget(self.log_output)
-        log_json_layout.addLayout(log_box_layout)
-        #json_box_layout = QVBoxLayout()
-        #json_box_layout.addWidget(QLabel("COR Log File:"))
-        #self.cor_json_output = QTextEdit()
-        #self.cor_json_output.setReadOnly(True)
-        #self.cor_json_output.setStyleSheet("QTextEdit { font-size: 12pt; }")
-        #json_box_layout.addWidget(self.cor_json_output)
-        #log_json_layout.addLayout(json_box_layout, 2)
-        #self.load_cor_json_btn = QPushButton("Load/create COR file")
-        #json_box_layout.addWidget(self.load_cor_json_btn)
-        #self.load_cor_json_btn.clicked.connect(self.load_cor_to_jsonbox)
-        left_layout.addLayout(log_json_layout)
-
+        #log_json_layout = QHBoxLayout()
+        #log_box_layout = QVBoxLayout()
+        #log_box_layout.addWidget(QLabel("Log Output:"))
+        #self.log_output = QTextEdit()
+        #self.log_output.setReadOnly(True)
+        #self.log_output.setStyleSheet("QTextEdit { font-size: 12.5pt; }")
+        #self.log_output.append("Start tomoGUI")
+        #log_box_layout.addWidget(self.log_output)
+        #og_json_layout.addLayout(log_box_layout)
+        #left_layout.addLayout(log_json_layout)
+        
         main_layout.addLayout(left_layout, 4)
-
+        
         # ==== RIGHT PANEL ====
         right_layout = QVBoxLayout()
         toolbar_row = QHBoxLayout()
@@ -604,7 +737,7 @@ class TomoGUI(QWidget):
         tomolog_group.setLayout(tomolog_layout)
         right_layout.addWidget(tomolog_group, 2)
 
-        main_layout.addLayout(right_layout, 4)
+        main_layout.addLayout(right_layout, 5)
         self.setLayout(main_layout)
 
         # Apply initial theme after UI is fully built
@@ -1946,9 +2079,114 @@ class TomoGUI(QWidget):
         dialog.setDirectory(start_dir)
         if dialog.exec():
             self.data_path.setText(dialog.selectedFiles()[0])
-            self.refresh_h5_files()
+            self.refresh_main_table()
             # Auto-refresh batch file list when folder is selected
-            self._refresh_batch_file_list()
+            self._refresh_batch_file_list() #TODO:Need decide if remove the batch process tab
+
+    def refresh_main_table(self):
+        table_folder = self.data_path.text()
+        if not table_folder or not os.path.isdir(table_folder):
+            QMessageBox.warning(self, "Warning", "Please select a valid data folder first.")
+            return
+        if self.batch_running:
+            reply = QMessageBox.question(
+                self, 'Queue Running',
+                f'A batch queue is currently running ({len(self.batch_running_jobs)} jobs active, {len(self.batch_job_queue)} queued).\n\n'
+                f'Refreshing will delete the table widgets but jobs will continue running in the background.\n\n'
+                f'Continue with refresh?',
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
+            self.log_output.append(f'<span style="color:orange;">⚠️  Refreshed file list while queue was running - status updates may be lost</span>')
+        h5_files = sorted(glob.glob(os.path.join(table_folder, "*.h5")), key=os.path.getmtime, reverse=True)
+        self.batch_file_main_table.setSortingEnabled(False)
+        self.batch_file_main_table.setRowCount(0)
+        self.batch_file_main_list = []
+        self.batch_last_clicked_row = None
+        #populate table
+        for f in h5_files:
+            filename = os.path.basename(f)
+            row = self.batch_file_main_table.rowCount()
+            self.batch_file_main_table.insertRow(row)
+            #check recon status
+            proj_name = os.path.splitext(filename)[0]
+            try_dir = os.path.join(f"{table_folder}_rec", "try_center", proj_name)
+            full_dir = os.path.join(f"{table_folder}_rec", f"{proj_name}_rec")
+            has_try = os.path.isdir(try_dir) and len(glob.glob(os.path.join(try_dir, "*.tiff"))) > 0
+            has_full = os.path.isdir(full_dir) and len(glob.glob(os.path.join(full_dir, "*.tiff"))) > 0
+            # Determine row color based on reconstruction status
+            if has_full:
+                row_color = "green"  # Full reconstruction exists
+            elif has_try:
+                row_color = "orange"  # Only try reconstruction exists
+            else:
+                row_color = "red"  # No reconstruction
+            # Store file info
+            file_info = {
+                'path': f,
+                'filename': filename,
+                'status': 'Ready',
+                'row': row,
+                'recon_status': row_color
+            }
+            self.batch_file_main_list.append(file_info)   
+            # Checkbox for selection with shift-click support
+            checkbox = QCheckBox()
+            checkbox.clicked.connect(lambda checked, r=row: self._batch_checkbox_clicked(r, checked))
+            checkbox_widget = QWidget()
+            checkbox_layout = QHBoxLayout(checkbox_widget)
+            checkbox_layout.addWidget(checkbox)
+            checkbox_layout.setAlignment(Qt.AlignCenter)
+            checkbox_layout.setContentsMargins(0, 0, 0, 0)
+            self.batch_file_main_table.setCellWidget(row, 0, checkbox_widget)
+            file_info['checkbox'] = checkbox
+
+            # Filename - show full name and set tooltip with full path
+            filename_item = QTableWidgetItem(filename)
+            filename_item.setToolTip(f"{filename}\n\nFull path:\n{f}")
+            self.batch_file_main_table.setItem(row, 1, filename_item)       
+
+            # COR value (editable)
+            cor_input = QLineEdit()
+            cor_input.setPlaceholderText("COR value")
+            cor_input.setAlignment(Qt.AlignCenter)
+            cor_input.setFixedWidth(80)
+
+            self.batch_file_main_table.setCellWidget(row, 2, cor_input)
+            file_info['cor_input'] = cor_input
+
+            # Status
+            status_item = QTableWidgetItem('Ready')
+            self.batch_file_main_table.setItem(row, 3, status_item)
+            file_info['status_item'] = status_item
+
+            # File size
+            try:
+                file_size = os.path.getsize(f)
+                size_str = self._format_file_size(file_size)
+                size_item = QTableWidgetItem(size_str)
+                size_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                # Store numeric value for proper sorting
+                size_item.setData(Qt.UserRole, file_size)
+                self.batch_file_main_table.setItem(row, 4, size_item)
+            except Exception as e:
+                self.batch_file_main_table.setItem(row, 4, QTableWidgetItem("N/A"))
+            # Actions button
+            actions_widget = QWidget()
+            actions_layout = QHBoxLayout(actions_widget)
+            actions_layout.setContentsMargins(2, 2, 2, 2)
+            actions_layout.setSpacing(2)
+            self.batch_file_main_table.setCellWidget(row, 5, actions_widget)
+            # Apply colored left border indicator based on reconstruction status
+            # Create a colored indicator in the checkbox column
+            checkbox_widget.setStyleSheet(f"QWidget {{ border-left: 6px solid {row_color}; }}")
+        # Re-enable sorting after populating the table
+        #self.batch_file_main_table.setSortingEnabled(True)
+        # Highlight the first row
+        if self.batch_file_main_table.rowCount() > 0:
+            self.batch_file_main_table.setCurrentCell(0, 0)  # Select the first cell in the first row
+            self.highlight_scan = h5_files[0] #always the latest coming in scan
 
     def refresh_h5_files(self):
         self.proj_file_box.clear()
@@ -1956,6 +2194,18 @@ class TomoGUI(QWidget):
         if folder and os.path.isdir(folder):
             for f in sorted(glob.glob(os.path.join(folder, "*.h5")),key=os.path.getmtime, reverse=True): #newest → oldest
                 self.proj_file_box.addItem(os.path.basename(f), f)
+
+    def on_table_row_clicked(self, row, column):
+        # Get the filename from the clicked row
+        filename_item = self.batch_file_main_table.item(row, 1)  # Column 1 contains the filename
+        if filename_item:
+            filename = filename_item.text()
+            # Update self.highlight_scan with the full path of the selected file
+            for file_info in self.batch_file_list:
+                if file_info['filename'] == filename:
+                    self.highlight_scan = file_info['path']
+            # Log or print the selected file for debugging
+            self.log_output.append(f'Click on {self.highlight_scan} now for other operations')
 
     def load_config(self):
         dialog = QFileDialog(self)
@@ -2260,7 +2510,7 @@ class TomoGUI(QWidget):
     # ===== RECONSTRUCTION METHODS =====
 
     def try_reconstruction(self):
-        proj_file = self.proj_file_box.currentData()
+        proj_file = self.highlight_scan #the scan highlighted in main table
         if not proj_file:
             self.log_output.append(f"\u274c No file")
             return
@@ -2278,7 +2528,7 @@ class TomoGUI(QWidget):
                 self.log_output.append(f'<span style="color:red;">\u274c wrong rotation axis input</span>')
                 return
         # cuda for tomocupy try
-        gpu = self.cuda_box_try.currentText().strip()
+        gpu = str(self.cuda_box_try.value())
         #add check box for config, seperate from selecting parameters from GUI
         if self.use_conf_box.isChecked():
             self.log_output.append("\u26a0\ufe0f You are using config file, only recon type, filename, rot axis from GUI")
@@ -2418,7 +2668,7 @@ class TomoGUI(QWidget):
             except ValueError:
                 self.log_output.append(f'<span style="color:red;">\u274c wrong rotation axis input</span>')
                 return
-        gpu = self.cuda_box_try.currentText().strip()
+        gpu = str(self.cuda_box_try.value)
         if self.use_conf_box.isChecked():
             self.log_output.append('\ufe0f You are using config file, only recon type, filename, rot axis from GUI')
             config_text = self.config_editor_try.toPlainText()
