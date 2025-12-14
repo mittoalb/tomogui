@@ -2191,6 +2191,7 @@ class TomoGUI(QWidget):
         if self.batch_file_main_table.rowCount() > 0:
             self.batch_file_main_table.setCurrentCell(0, 0)  # Select the first cell in the first row
             self.highlight_scan = h5_files[0] #always the latest coming in scan
+            self.highlight_row = 0
 
     def refresh_h5_files(self):
         self.proj_file_box.clear()
