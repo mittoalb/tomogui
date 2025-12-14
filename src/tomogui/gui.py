@@ -60,6 +60,7 @@ class TomoGUI(QWidget):
         self.batch_running = False
         self.batch_file_list = []
         self.highlight_scan = None
+        self.highlight_row = None
         self._current_source_file = None
 
         # Batch selection state for shift-click
@@ -2205,6 +2206,7 @@ class TomoGUI(QWidget):
             for file_info in self.batch_file_list:
                 if file_info['filename'] == filename:
                     self.highlight_scan = file_info['path']
+                    self.highlight_row = row #gives index of the self.batch_file_table_list
             # Log or print the selected file for debugging
             self.log_output.append(f'Click on {self.highlight_scan} now for other operations')
 
@@ -2509,6 +2511,17 @@ class TomoGUI(QWidget):
         return p
 
     # ===== RECONSTRUCTION METHODS =====
+    def _update_row(self,row,color,status):
+        row = self.highlight_row
+        if row is None:
+            self.log_output.append(f'<span style="color:red;">\u274c No row highlighted</span>')
+            return
+        self.batch_file_main_list[row]['recon_status'] = color
+        checkbox_widget = self.batch_file_main_table.cellWidget(row, 0)
+        if checkbox_widget:
+            checkbox_widget.setStyleSheet(f"QWidget {{ border-left: 6px solid {color}; }}")
+        self.batch_file_main_list[row]['status'].setText(status)
+
 
     def try_reconstruction(self):
         proj_file = self.highlight_scan #the scan highlighted in main table full path
@@ -2574,10 +2587,8 @@ class TomoGUI(QWidget):
         code = self.run_command_live(cmd, proj_file=proj_file, job_label="Try recon", wait=True, cuda_devices=gpu)
         try:
             if code == 0:
+                self._update_row(row=self.highlight_row,color='yellow',status='done try') #chante table content and self.batch_file_list
                 self.log_output.append(f'<span style="color:green;">\u2705 Done try recon {proj_file}</span>')
-                rc = "orange"  # Default to orange (try done)
-                self.batch_file_main_list
-                self.checkbox_widget.setStyleSheet(f"QWidget {{ border-left: 6px solid {rc}; }}")
             else:
                 self.log_output.append(f'<span style="color:red;">\u274c Try recon {proj_file} failed</span>')
         finally:
