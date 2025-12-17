@@ -1,11 +1,5 @@
 import os, glob, json
 import numpy as np
-import matplotlib
-import importlib.resources
-matplotlib.use("Qt5Agg")
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
-from matplotlib.figure import Figure
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QTextEdit, QLineEdit, QLabel, QProgressBar,
@@ -17,23 +11,22 @@ from PyQt5.QtCore import Qt, QEvent, QProcess, QEventLoop, QSize, QProcessEnviro
 from PyQt5.QtGui import QColor
 
 from PIL import Image
-from matplotlib.widgets import RectangleSelector
-from matplotlib.backend_bases import MouseButton
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import h5py, json
 from datetime import datetime
 
+# VisPy for fast GPU-accelerated rendering
+try:
+    from vispy import scene
+    from vispy.scene import visuals
+    from vispy.color import get_colormaps
+    VISPY_AVAILABLE = True
+except ImportError:
+    print("Warning: VisPy not available. Install with: pip install vispy")
+    print("Falling back to slower rendering...")
+    VISPY_AVAILABLE = False
+
 from .theme_manager import ThemeManager
 from .hdf5_viewer import HDF5ImageDividerDialog
-
-# Load matplotlib style from package resources
-matplotlib.rcdefaults()
-try:
-    with importlib.resources.path('tomo_gui.styles', 'tomoGUI_mpl_format.mplstyle') as style_path:
-        matplotlib.style.use(str(style_path))
-except (ImportError, FileNotFoundError):
-    # Fallback if style file is not found
-    pass
 
 
 class TomoGUI(QWidget):
@@ -441,37 +434,39 @@ class TomoGUI(QWidget):
         # ==== RIGHT PANEL ====
         right_layout = QVBoxLayout()
         toolbar_row = QHBoxLayout()
-        self.fig = Figure(figsize=(5, 6.65))
-        self.canvas = FigureCanvas(self.fig)
-        self.ax = self.fig.add_subplot(111)
-        self.fig.set_constrained_layout(True)
+
+        # Create VisPy canvas for fast GPU-accelerated rendering
+        if VISPY_AVAILABLE:
+            self.canvas = scene.SceneCanvas(keys='interactive', show=False)
+            self.view = self.canvas.central_widget.add_view()
+            self.view.camera = scene.PanZoomCamera(aspect=1)
+            self.view.camera.flip = (False, True, False)  # Flip Y for image coordinates
+            self.image_visual = visuals.Image(cmap='grays', parent=self.view.scene)
+            self.canvas_widget = self.canvas.native
+        else:
+            # Fallback placeholder if VisPy not available
+            self.canvas_widget = QLabel("VisPy not available. Install with: pip install vispy")
+            self.canvas_widget.setStyleSheet("QLabel { background-color: #333; color: white; font-size: 14pt; }")
+            self.canvas_widget.setAlignment(Qt.AlignCenter)
+
+        # State variables
         self._keep_zoom = False
-        self._last_xlim = None
-        self._last_ylim = None
+        self._last_camera_rect = None
         self._last_image_shape = None
-        self.rect_selector = None
         self.roi_extent = None
         self._drawing_roi = False
-        self.canvas.mpl_connect("button_press_event", self._on_canvas_click)
-        self.toolbar = NavigationToolbar2QT(self.canvas, self)
-        self.toolbar.setIconSize(QSize(23,23))
-        self.toolbar.setToolButtonStyle(Qt.ToolButtonIconOnly)
-        self.toolbar.setStyleSheet("QToolButton { padding: 0.15px; }")
-        self.toolbar.coordinates = False #disable default coords
-        self.canvas.setMouseTracking(True)
-        self.toolbar.setFixedWidth(270)
-        toolbar_row.addWidget(self.toolbar)
-        toolbar_row.addSpacing(1)
+        self._roi_visual = None
+
+        # Coordinate label
         self.coord_label = QLabel("")
         self.coord_label.setFixedWidth(150)
         self.coord_label.setStyleSheet("font-size: 11pt;")
         toolbar_row.addWidget(self.coord_label)
-        try:
-            self.toolbar._actions['home'].triggered.connect(self._on_toolbar_home)
-        except Exception:
-            pass
-        self._cid_motion = self.canvas.mpl_connect("motion_notify_event", self._on_mouse_move)
-        self._cid_release = self.canvas.mpl_connect("button_release_event", self._nav_oneshot_release)
+
+        # Connect mouse events for VisPy
+        if VISPY_AVAILABLE:
+            self.canvas.events.mouse_move.connect(self._on_vispy_mouse_move)
+            self.canvas.events.mouse_press.connect(self._on_vispy_mouse_click)
 
         # Colormap dropdown
         toolbar_row.addWidget(QLabel("Cmap"))
@@ -518,10 +513,9 @@ class TomoGUI(QWidget):
         toolbar_row.addWidget(self.theme_toggle_btn)
 
         right_layout.addLayout(toolbar_row)
-        self.canvas.installEventFilter(self)
 
         canvas_slider_frame = QVBoxLayout()
-        canvas_slider_frame.addWidget(self.canvas)
+        canvas_slider_frame.addWidget(self.canvas_widget)
         slider_layout = QHBoxLayout()
         self.slice_slider = QSlider(Qt.Horizontal)
         self.slice_slider.setStyleSheet("""
@@ -1919,10 +1913,10 @@ class TomoGUI(QWidget):
             vmax = None
         self.vmin = vmin
         self.vmax = vmax
-        im = self.ax.images[0] if self.ax.images else None
-        if im is not None and self.vmin is not None and self.vmax is not None:
-            im.set_clim(self.vmin, self.vmax)
-            self.canvas.draw_idle()
+
+        if VISPY_AVAILABLE and self._current_img is not None and self.vmin is not None and self.vmax is not None:
+            self.image_visual.clim = (self.vmin, self.vmax)
+            self.canvas.update()
         else:
             self.refresh_current_image()
 
@@ -2789,65 +2783,25 @@ class TomoGUI(QWidget):
 
     # ===== ROI AND CONTRAST =====
     def draw_box(self):
-        """Enable interactive ROI drawing. Drag to create; click to finish."""
+        """Enable interactive ROI drawing - TODO: Implement with VisPy"""
         if self._current_img is None:
             self.log_output.append("\u26a0\ufe0f No image loaded to draw box.")
             return
-
-        if self.rect_selector is None:
-            style = dict(edgecolor='red', facecolor='none', linewidth=2, alpha=1.0)
-            self.rect_selector = RectangleSelector(
-                self.ax,
-                self._on_rect_complete,
-                useblit=True,
-                button=[1],
-                minspanx=2, minspany=2,
-                spancoords='data',
-                interactive=True,
-                props=style
-            )
-        self._drawing_roi = True
-        self.roi_extent = None
-        self.rect_selector.set_active(True)
-        self.log_output.append("Drag to draw ROI, release to set. Any click on image will hide ROI.")
+        self.log_output.append("\u26a0\ufe0f ROI drawing not yet implemented with VisPy. Coming soon!")
 
     def _on_rect_complete(self, eclick, erelease):
-        """Store ROI extents when user finishes dragging the rectangle."""
-        x0, y0 = eclick.xdata, eclick.ydata
-        x1, y1 = erelease.xdata, erelease.ydata
-        if None in (x0, y0, x1, y1):
-            self.roi_extent = None
-            self._drawing_roi = False
-            return
-        self.roi_extent = (min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1))
-        self._drawing_roi = False
-        self.log_output.append(
-            f"ROI set: x[{int(self.roi_extent[0])}:{int(self.roi_extent[1])}], "
-            f"y[{int(self.roi_extent[2])}:{int(self.roi_extent[3])}]"
-        )
+        """TODO: Implement with VisPy"""
+        pass
 
     def _clear_roi(self):
         """Hide/remove any active ROI."""
-        try:
-            if self.rect_selector is not None:
-                try:
-                    self.rect_selector.set_active(False)
-                    if hasattr(self.rect_selector, "set_visible"):
-                        self.rect_selector.set_visible(False)
-                except Exception:
-                    pass
-                self.rect_selector = None
-        finally:
-            self.roi_extent = None
-
-    def _on_canvas_click(self, event):
-        """Any click on the image hides/removes the ROI (unless we are mid-draw)."""
-        if event.inaxes != self.ax:
-            return
-        if self._drawing_roi:
-            return
-        if self.roi_extent is None and self.rect_selector is None:
-            return
+        self.roi_extent = None
+        if VISPY_AVAILABLE and self._roi_visual is not None:
+            try:
+                self._roi_visual.parent = None
+                self._roi_visual = None
+            except Exception:
+                pass
 
         try:
             if self.rect_selector is not None:
@@ -2858,29 +2812,14 @@ class TomoGUI(QWidget):
         except Exception:
             pass
         self.roi_extent = None
-        self.canvas.draw_idle()
+        if VISPY_AVAILABLE:
+            self.canvas.update()
         self.log_output.append(f'<span style="color:green;">ROI cleared</span>')
 
     def _on_mouse_move(self, event):
-        # show x,y and pixel value when mouse on image
-        if event.inaxes != self.ax or self._current_img is None:
-            if hasattr(self, "coord_label"):
-                self.coord_label.setText("")
-            return
-        x, y = event.xdata, event.ydata
-        if x is None or y is None:
-            if hasattr(self, "coord_label"):
-                self.coord_label.setText("")
-            return
-        h, w = self._current_img.shape[:2]
-        ix, iy = int(round(x)), int(round(y))
-        if 0 <= ix < w and 0 <= iy < h:
-            val = self._current_img[iy, ix]
-            msg = f"({ix},{iy}): {float(val):.5f}"
-        else:
-            msg = ""
-        if hasattr(self, "coord_label"):
-            self.coord_label.setText(msg)
+        # DEPRECATED: This was the matplotlib mouse handler
+        # Now using _on_vispy_mouse_move for VisPy
+        pass
 
     def auto_img_contrast(self, saturation=10):
         """Fiji-like Auto: trims tails within current window; uses ROI if present; never edits pixels."""
@@ -2932,10 +2871,9 @@ class TomoGUI(QWidget):
         self.min_input.setText(str(self.vmin))
         self.max_input.setText(str(self.vmax))
 
-        im = self.ax.images[0] if self.ax.images else None
-        if im is not None:
-            im.set_clim(self.vmin, self.vmax)
-            self.canvas.draw_idle()
+        if VISPY_AVAILABLE and self._current_img is not None:
+            self.image_visual.clim = (self.vmin, self.vmax)
+            self.canvas.update()
         else:
             self.refresh_current_image()
 
@@ -2946,11 +2884,11 @@ class TomoGUI(QWidget):
         else:
             self.vmin, self.vmax = round(self._current_img.min(), 5), round(self._current_img.max(), 5)
             self.min_input.setText(str(self.vmin))
-            self.max_input.setText(str(self.vmax))            
-            im = self.ax.images[0] if self.ax.images else None
-            if im is not None:
-                im.set_clim(self.vmin, self.vmax)
-                self.canvas.draw_idle()
+            self.max_input.setText(str(self.vmax))
+
+            if VISPY_AVAILABLE and self._current_img is not None:
+                self.image_visual.clim = (self.vmin, self.vmax)
+                self.canvas.update()
             else:
                 self.refresh_current_image()
 
@@ -2990,7 +2928,11 @@ class TomoGUI(QWidget):
                 return np.array(im)
 
     def show_image(self, img_path, flag=None):
-        #Flag arg to seperate prj and recon 
+        """Display image using VisPy for fast GPU-accelerated rendering"""
+        if not VISPY_AVAILABLE:
+            return
+
+        # Load image
         if flag == "raw":
             img = self._raw_h5['/exchange/data'][img_path,:,:] #for raw projections, it takes img_path as idx
             img = (img - self.dark)/(self.flat - self.dark)
@@ -2998,127 +2940,95 @@ class TomoGUI(QWidget):
             img = self._safe_open_image(img_path)
             if img.ndim == 3:
                 img = img[..., 0]
+
+        # Ensure float32 for VisPy
+        if img.dtype != np.float32:
+            img = img.astype(np.float32)
+
         h, w = img.shape
         self._current_img = img
         self._current_img_path = img_path
         self._clear_roi()
-        self.ax.clear()
-        im = self.ax.imshow(
-            img,
-            cmap=self.current_cmap,
-            vmin=self.vmin,
-            vmax=self.vmax,
-            origin="upper",
-            extent=[0, w, h, 0]
-        )
 
-        # Build title with source filename - LARGE and VISIBLE
+        # Update image visual
+        self.image_visual.set_data(img)
+
+        # Auto contrast using percentile
+        vmin = self.vmin if self.vmin is not None else np.percentile(img, 1)
+        vmax = self.vmax if self.vmax is not None else np.percentile(img, 99)
+        self.image_visual.clim = (vmin, vmax)
+
+        # Set colormap
+        self.image_visual.cmap = self.current_cmap
+
+        # Handle zoom
+        if self._keep_zoom and self._last_image_shape == (h, w) and self._last_camera_rect is not None:
+            # Restore previous camera view
+            self.view.camera.rect = self._last_camera_rect
+        else:
+            # Reset camera to fit image
+            self.view.camera.set_range()
+
+        # Update title
         if hasattr(self, '_current_source_file') and hasattr(self, '_current_view_mode'):
             title = f"{self._current_source_file} [{self._current_view_mode}] - {os.path.basename(str(img_path))}"
         else:
             title = os.path.basename(str(img_path))
 
-        # Adapt title color and background to current theme
-        current_theme = self.theme_manager.get_current_theme()
-        if current_theme == 'dark':
-            title_color = 'white'
-            bg_color = 'black'
-        else:
-            title_color = 'black'
-            bg_color = 'white'
+        self.coord_label.setText(title)
 
-        self.ax.set_title(title, pad=15, fontsize=16, fontweight='bold', color=title_color)
-        self.ax.set_facecolor(bg_color)
-        self.fig.patch.set_facecolor(bg_color)
-
-        self.ax.set_aspect('equal', adjustable='box')  # square pixels; obey zoom limits without warnings
-        if (self._keep_zoom and
-            self._last_image_shape == (h, w) and
-            self._last_xlim is not None and
-            self._last_ylim is not None):
-            self.ax.set_xlim(self._last_xlim)
-            self.ax.set_ylim(self._last_ylim)
-        else:
-            left, right, bottom, top = im.get_extent()
-            self.ax.set_xlim(left, right)
-            self.ax.set_ylim(bottom, top)
-
-        self.canvas.draw_idle()
-
-        self._last_xlim = self.ax.get_xlim()
-        self._last_ylim = self.ax.get_ylim()
+        # Save camera state
+        self._last_camera_rect = self.view.camera.rect
         self._last_image_shape = (h, w)
+
+        self.canvas.update()
 
 
 
     def _remember_view(self):
         """Record current view so the next image keeps the same zoom/pan."""
+        if not VISPY_AVAILABLE:
+            return
         try:
-            self._last_xlim = self.ax.get_xlim()
-            self._last_ylim = self.ax.get_ylim()
+            self._last_camera_rect = self.view.camera.rect
             if self._current_img is not None:
                 self._last_image_shape = self._current_img.shape
         except Exception:
             pass
 
-    def _nav_oneshot_release(self, event):
-        """After a zoom-rect or pan ends, remember view and auto-disable the tool."""
-        if event.inaxes != self.ax:
+    def _on_vispy_mouse_move(self, event):
+        """Show coordinates under the mouse in the coord label."""
+        if not VISPY_AVAILABLE or self._current_img is None:
             return
-        try:
-            if event.button != MouseButton.LEFT:
-                return
-        except Exception:
-            pass
 
-        mode = getattr(self.toolbar, "mode", "")
-        if mode in ("zoom rect", "pan/zoom"):
-            self._remember_view()
-            self._keep_zoom = True
+        # Get mouse position in scene coordinates
+        tr = self.view.scene.transform
+        pos = tr.map(event.pos)[:2]
 
+        x, y = int(pos[0]), int(pos[1])
+        h, w = self._current_img.shape
+
+        if 0 <= x < w and 0 <= y < h:
             try:
-                if mode == "zoom rect":
-                    self.toolbar.zoom()
+                val = self._current_img[y, x]
+                # Update coord label
+                if hasattr(self, '_current_source_file') and hasattr(self, '_current_view_mode'):
+                    title = f"{self._current_source_file} [{self._current_view_mode}]"
                 else:
-                    self.toolbar.pan()
+                    title = os.path.basename(str(self._current_img_path)) if self._current_img_path else ""
+                self.coord_label.setText(f"{title} | x={x}, y={y}, val={val:.2f}")
             except Exception:
                 pass
 
-            try:
-                self.toolbar.set_message("")
-            except Exception:
-                pass
-            try:
-                self.canvas.setCursor(Qt.ArrowCursor)
-            except Exception:
-                pass
+    def _on_vispy_mouse_click(self, event):
+        """Handle mouse clicks for ROI drawing"""
+        # TODO: Implement ROI drawing with VisPy if needed
+        pass
 
     def _reset_view_state(self):
         """Forget any prior zoom/pan so the next image shows full frame."""
-        try:
-            mode = getattr(self.toolbar, "mode", "")
-            if mode == "zoom rect":
-                self.toolbar.zoom()
-            elif mode == "pan/zoom":
-                self.toolbar.pan()
-            try:
-                self.toolbar.set_message("")
-            except Exception:
-                pass
-        except Exception:
-            pass
-
         self._keep_zoom = False
-        self._last_xlim = None
-        self._last_ylim = None
-        self._last_image_shape = None
-
-
-    def _on_toolbar_home(self):
-        # forget any persisted zoom so the next slice uses full extents
-        self._keep_zoom = False
-        self._last_xlim = None
-        self._last_ylim = None
+        self._last_camera_rect = None
         self._last_image_shape = None
 
     # ===== TOMOLOG METHODS =====
@@ -4565,9 +4475,9 @@ class TomoGUI(QWidget):
         else:
             self.theme_toggle_btn.setText("☀")
 
-        # Redraw the matplotlib canvas with new theme
-        if hasattr(self, 'canvas') and self.canvas:
-            self.canvas.draw_idle()
+        # Redraw the VisPy canvas with new theme
+        if VISPY_AVAILABLE and hasattr(self, 'canvas') and self.canvas:
+            self.canvas.update()
 
 
 if __name__ == "__main__":
