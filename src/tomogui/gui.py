@@ -15,6 +15,8 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QEvent, QProcess, QEventLoop, QSize, QProcessEnvironment
 from PyQt5.QtGui import QColor
+from pathlib import Path
+
 
 from PIL import Image
 from matplotlib.widgets import RectangleSelector
@@ -2117,10 +2119,13 @@ class TomoGUI(QWidget):
             full_dir = os.path.join(f"{table_folder}_rec", f"{proj_name}_rec")
             has_try = os.path.isdir(try_dir) and len(glob.glob(os.path.join(try_dir, "*.tiff"))) > 0
             has_full = os.path.isdir(full_dir) and len(glob.glob(os.path.join(full_dir, "*.tiff"))) > 0
+            fp = glob.glob(os.path.join(full_dir, "*.tiff"))
+            num_1 = int(Path(fp[0]).stem.split("_")[-1])
+            num_2 = int(Path(fp[-1]).stem.split("_")[-1])
             # Determine row color based on reconstruction status
             if has_full:
                 row_color = "green"  # Full reconstruction exists
-                status_item = QTableWidgetItem("Done full")
+                status_item = QTableWidgetItem(f"Full {num_1}-{num_2}")
             elif has_try:
                 row_color = "orange"  # Only try reconstruction exists
                 status_item = QTableWidgetItem("Done try")
@@ -2698,7 +2703,7 @@ class TomoGUI(QWidget):
         ssh_cmd = ["ssh", machine, remote_cmd]
 
         return ssh_cmd
-        
+
     def batch_try_reconstruction(self):
         try:
             start_num = int(self.start_scan_input.text())
@@ -2852,7 +2857,7 @@ class TomoGUI(QWidget):
     # ===== COR MANAGEMENT =====
     def record_cor_main_tb(self):
         '''
-        link to Add COR function: get cor from current viewing image, save to csv file and update main table
+        link to Add COR function: get cor from current viewing image, save to json file and update main table
         '''
         data_folder = self.data_path.text().strip()
         proj_file = self.highlight_scan
