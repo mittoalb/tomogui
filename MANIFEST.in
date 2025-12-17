@@ -1,4 +1,4 @@
 include README.md
 include LICENSE
-recursive-include src/tomogui/styles *.mplstyle
+recursive-include src/tomogui/styles *.py
 recursive-include docs *.md
