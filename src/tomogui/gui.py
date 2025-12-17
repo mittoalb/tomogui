@@ -63,6 +63,7 @@ class TomoGUI(QWidget):
         self.highlight_row = None
         self._current_source_file = None
         self.cor_path = None
+        self.batch_file_main_list = []
 
         # Batch selection state for shift-click
         self.batch_last_clicked_row = None
@@ -1983,8 +1984,7 @@ class TomoGUI(QWidget):
         self.batch_current_num_gpus = 1  # Current number of GPUs
 
 
-    # ===== HELPER METHODS =====
-    
+    # ===== HELP METHODS =====
     def help_tomo(self):
         """Run the CLI `tomocupy recon (or recon_steps) -h` and show output in the GUI log."""
         name = "tomocupy-help"
@@ -2662,6 +2662,43 @@ class TomoGUI(QWidget):
                     self.log_output.append(f'<span style="color:red;">\u26a0\ufe0f Could not remove {temp_full}: {e}</span>')
         self.view_btn.setEnabled(True)
 
+    #=============Batch OPERATIONS==================
+    def _batch_select_all(self):
+        """Select all files in the batch list"""
+        for file_info in self.batch_file_main_list:
+            file_info['checkbox'].setChecked(True)
+        self.log_output(f'<span style="color:green;">Select all files in table</span>')
+
+    def _batch_deselect_all(self):
+        """Deselect all files in the batch list"""
+        for file_info in self.batch_file_main_list:
+            file_info['checkbox'].setChecked(False)
+        self.log_output(f'<span style="color:green;">Unselect all files in table</span>')
+
+    def _get_batch_machine_command(self, cmd, machine):
+        """
+        Wrap command for remote execution via SSH if needed
+
+        Args:
+            cmd: List of command arguments (e.g., ["tomocupy", "recon", ...])
+            machine: Machine name ("Local", "tomo1", etc.)
+
+        Returns:
+            List of command arguments, potentially wrapped in SSH
+        """
+        if machine == "Local":
+            return cmd
+
+        # Build SSH command to execute on remote machine
+        # Assumes SSH keys are set up for passwordless login
+        # Properly quote arguments for shell execution
+        remote_cmd = " ".join([f'"{str(arg)}"' if " " in str(arg) else str(arg) for arg in cmd])
+
+        # Use SSH to execute the command on the remote machine
+        ssh_cmd = ["ssh", machine, remote_cmd]
+
+        return ssh_cmd
+        
     def batch_try_reconstruction(self):
         try:
             start_num = int(self.start_scan_input.text())
@@ -3190,8 +3227,6 @@ class TomoGUI(QWidget):
         idx = self.slice_slider.value()
         if 0 <= idx < len(self.preview_files):
             self.show_image(self.preview_files[idx], flag=None)
-        
-        
 
     def update_full_slice(self):
         self._keep_zoom = True
@@ -3348,8 +3383,10 @@ class TomoGUI(QWidget):
         self._last_ylim = None
         self._last_image_shape = None
 
-    # ===== TOMOLOG METHODS =====
 
+
+
+    # ===== TOMOLOG METHODS =====
     def get_note_value(self):
         note = self.note_input.text().strip()
         return f'"{note}"' if note else None
@@ -3469,31 +3506,6 @@ class TomoGUI(QWidget):
                 self.log_output.append(f'<span style="color:red;">\u274c Tomolog {input_fn} failed</span>')
 
     # ===== BATCH PROCESSING METHODS =====
-
-    def _get_batch_machine_command(self, cmd, machine):
-        """
-        Wrap command for remote execution via SSH if needed
-
-        Args:
-            cmd: List of command arguments (e.g., ["tomocupy", "recon", ...])
-            machine: Machine name ("Local", "tomo1", etc.)
-
-        Returns:
-            List of command arguments, potentially wrapped in SSH
-        """
-        if machine == "Local":
-            return cmd
-
-        # Build SSH command to execute on remote machine
-        # Assumes SSH keys are set up for passwordless login
-        # Properly quote arguments for shell execution
-        remote_cmd = " ".join([f'"{str(arg)}"' if " " in str(arg) else str(arg) for arg in cmd])
-
-        # Use SSH to execute the command on the remote machine
-        ssh_cmd = ["ssh", machine, remote_cmd]
-
-        return ssh_cmd
-
     def _run_reconstruction_on_machine(self, file_path, recon_type='try'):
         """
         Run reconstruction on selected machine (local or remote)
@@ -3956,15 +3968,6 @@ class TomoGUI(QWidget):
                 self.log_output.append(f'<span style="color:red;">❌ Failed to load COR CSV: {e}</span>')
                 QMessageBox.critical(self, "Error", f"Failed to load COR values:\n{e}")
 
-    def _batch_select_all(self):
-        """Select all files in the batch list"""
-        for file_info in self.batch_file_list:
-            file_info['checkbox'].setChecked(True)
-
-    def _batch_deselect_all(self):
-        """Deselect all files in the batch list"""
-        for file_info in self.batch_file_list:
-            file_info['checkbox'].setChecked(False)
 
     def _batch_remove_selected(self):
         """Physically delete selected files from the filesystem"""
