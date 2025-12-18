@@ -436,17 +436,31 @@ class TomoGUI(QWidget):
         toolbar_row = QHBoxLayout()
 
         # Create VisPy canvas for fast GPU-accelerated rendering
+        vispy_error = None
+        vispy_initialized = False
         if VISPY_AVAILABLE:
-            self.canvas = scene.SceneCanvas(keys='interactive', show=False)
-            self.view = self.canvas.central_widget.add_view()
-            self.view.camera = scene.PanZoomCamera(aspect=1)
-            self.view.camera.flip = (False, True, False)  # Flip Y for image coordinates
-            self.image_visual = visuals.Image(cmap='grays', parent=self.view.scene)
-            self.canvas_widget = self.canvas.native
-        else:
-            # Fallback placeholder if VisPy not available
-            self.canvas_widget = QLabel("VisPy not available. Install with: pip install vispy")
-            self.canvas_widget.setStyleSheet("QLabel { background-color: #333; color: white; font-size: 14pt; }")
+            try:
+                self.canvas = scene.SceneCanvas(keys='interactive', show=False)
+                self.view = self.canvas.central_widget.add_view()
+                self.view.camera = scene.PanZoomCamera(aspect=1)
+                self.view.camera.flip = (False, True, False)  # Flip Y for image coordinates
+                self.image_visual = visuals.Image(cmap='grays', parent=self.view.scene)
+                self.canvas_widget = self.canvas.native
+                vispy_initialized = True
+            except Exception as e:
+                vispy_error = str(e)
+                print(f"Warning: VisPy initialization failed: {e}")
+
+        if not vispy_initialized:
+            # Fallback placeholder if VisPy not available or failed
+            error_msg = "VisPy not available"
+            if vispy_error:
+                if "OpenGL" in vispy_error or "GL" in vispy_error:
+                    error_msg = "OpenGL not available. VisPy requires GPU/display support."
+                else:
+                    error_msg = f"VisPy error: {vispy_error[:100]}"
+            self.canvas_widget = QLabel(error_msg + "\nImage viewing disabled.")
+            self.canvas_widget.setStyleSheet("QLabel { background-color: #333; color: #f88; font-size: 11pt; padding: 20px; }")
             self.canvas_widget.setAlignment(Qt.AlignCenter)
 
         # State variables
@@ -464,7 +478,7 @@ class TomoGUI(QWidget):
         toolbar_row.addWidget(self.coord_label)
 
         # Connect mouse events for VisPy
-        if VISPY_AVAILABLE:
+        if vispy_initialized:
             self.canvas.events.mouse_move.connect(self._on_vispy_mouse_move)
             self.canvas.events.mouse_press.connect(self._on_vispy_mouse_click)
 
@@ -4480,6 +4494,15 @@ class TomoGUI(QWidget):
                 cmd += ["--rotation-axis-auto", "auto"]
             else:
                 cmd += ["--rotation-axis-auto", "manual", "--rotation-axis", str(cor)]
+
+            # Append all GUI parameters (same as main tab)
+            cmd += self._gather_params_args()
+            cmd += self._gather_rings_args()
+            cmd += self._gather_bhard_args()
+            cmd += self._gather_phase_args()
+            cmd += self._gather_Geometry_args()
+            cmd += self._gather_Data_args()
+            cmd += self._gather_Performance_args()
 
         # Wrap for remote execution if needed
         cmd = self._get_batch_machine_command(cmd, machine)
