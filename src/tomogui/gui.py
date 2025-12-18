@@ -251,8 +251,7 @@ class TomoGUI(QWidget):
         others_ops.addWidget(view_prj_btn)
         view_meta_btn = QPushButton("meta")
         view_meta_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
-        view_meta_btn.setEnabled(False) #disable TODO
-        #view_meta_btn.clicked.connect(self.view_metadata) #TODO: needs to modify with alrady have functions in Batch Processing tab
+        view_meta_btn.clicked.connect(lambda checked=False: self._batch_view_data(self.highlight_scan)) #TODO: needs to modify with alrady have functions in Batch Processing tab
         others_ops.addWidget(view_meta_btn)
         save_param_btn = QPushButton("Save params")
         save_param_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
