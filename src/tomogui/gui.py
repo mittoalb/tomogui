@@ -4519,6 +4519,8 @@ class TomoGUI(QWidget):
 
         # Initialize output buffer to accumulate process output
         p.setProperty('output_buffer', '')
+        # Store incomplete line buffer for proper line handling
+        p.setProperty('line_buffer', '')
 
         # Connect to readyRead signal to accumulate output and display it
         def accumulate_output():
@@ -4526,20 +4528,31 @@ class TomoGUI(QWidget):
             new_data = p.readAllStandardOutput().data().decode('utf-8', errors='ignore')
             p.setProperty('output_buffer', current_buffer + new_data)
 
-            # Display output in real-time to the log console
-            if new_data.strip():
-                # Color code based on content
-                lines = new_data.strip().split('\n')
-                for line in lines:
+            # Handle line buffering for proper display
+            line_buffer = p.property('line_buffer') or ''
+            line_buffer += new_data
+
+            # Process complete lines only
+            lines = line_buffer.split('\n')
+            # Keep the last incomplete line in buffer
+            p.setProperty('line_buffer', lines[-1])
+            complete_lines = lines[:-1]
+
+            # Display complete lines in real-time to the log console
+            for line in complete_lines:
+                if line.strip():  # Only display non-empty lines
+                    # Escape HTML special characters
+                    line_escaped = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
                     line_lower = line.lower()
                     if 'error' in line_lower or 'failed' in line_lower:
-                        self.log_output.append(f'<span style="color:#ff6b6b;">{line}</span>')
+                        self.log_output.append(f'<span style="color:#ff6b6b; font-family:monospace;">{line_escaped}</span>')
                     elif 'warning' in line_lower:
-                        self.log_output.append(f'<span style="color:#ffa500;">{line}</span>')
+                        self.log_output.append(f'<span style="color:#ffa500; font-family:monospace;">{line_escaped}</span>')
                     elif 'rotation axis' in line_lower or 'cor' in line_lower:
-                        self.log_output.append(f'<span style="color:#4A9EFF;">{line}</span>')
+                        self.log_output.append(f'<span style="color:#4A9EFF; font-family:monospace;">{line_escaped}</span>')
                     else:
-                        self.log_output.append(f'<span style="color:#ddd;">{line}</span>')
+                        self.log_output.append(f'<span style="color:#bbb; font-family:monospace; font-size:9pt;">{line_escaped}</span>')
 
         p.readyReadStandardOutput.connect(accumulate_output)
 
