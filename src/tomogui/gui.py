@@ -4541,18 +4541,31 @@ class TomoGUI(QWidget):
             # Display complete lines in real-time to the log console
             for line in complete_lines:
                 if line.strip():  # Only display non-empty lines
-                    # Escape HTML special characters
-                    line_escaped = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    # Skip progress bar lines (contain lots of █ or | characters and percentages)
+                    if 'queue size' in line and ('█' in line or '|' in line) and '%' in line:
+                        continue  # Skip repetitive progress bars
 
-                    line_lower = line.lower()
+                    # Strip ANSI color codes for cleaner display
+                    import re
+                    line_clean = re.sub(r'\x1b\[[0-9;]*m', '', line)
+
+                    # Escape HTML special characters
+                    line_escaped = line_clean.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+                    line_lower = line_clean.lower()
                     if 'error' in line_lower or 'failed' in line_lower:
                         self.log_output.append(f'<span style="color:#ff6b6b; font-family:monospace;">{line_escaped}</span>')
                     elif 'warning' in line_lower:
                         self.log_output.append(f'<span style="color:#ffa500; font-family:monospace;">{line_escaped}</span>')
                     elif 'rotation axis' in line_lower or 'cor' in line_lower:
                         self.log_output.append(f'<span style="color:#4A9EFF; font-family:monospace;">{line_escaped}</span>')
+                    elif 'reconstruction time' in line_lower or 'usfft' in line_lower or '2025-' in line:
+                        # Show important info lines (timing, FFT, timestamps)
+                        self.log_output.append(f'<span style="color:#90ee90; font-family:monospace;">{line_escaped}</span>')
                     else:
-                        self.log_output.append(f'<span style="color:#bbb; font-family:monospace; font-size:9pt;">{line_escaped}</span>')
+                        # Only show other lines if they seem meaningful (not just progress)
+                        if len(line_clean.strip()) > 10:  # Skip very short lines
+                            self.log_output.append(f'<span style="color:#bbb; font-family:monospace; font-size:9pt;">{line_escaped}</span>')
 
         p.readyReadStandardOutput.connect(accumulate_output)
 
