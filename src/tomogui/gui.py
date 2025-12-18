@@ -4520,11 +4520,26 @@ class TomoGUI(QWidget):
         # Initialize output buffer to accumulate process output
         p.setProperty('output_buffer', '')
 
-        # Connect to readyRead signal to accumulate output
+        # Connect to readyRead signal to accumulate output and display it
         def accumulate_output():
             current_buffer = p.property('output_buffer') or ''
             new_data = p.readAllStandardOutput().data().decode('utf-8', errors='ignore')
             p.setProperty('output_buffer', current_buffer + new_data)
+
+            # Display output in real-time to the log console
+            if new_data.strip():
+                # Color code based on content
+                lines = new_data.strip().split('\n')
+                for line in lines:
+                    line_lower = line.lower()
+                    if 'error' in line_lower or 'failed' in line_lower:
+                        self.log_output.append(f'<span style="color:#ff6b6b;">{line}</span>')
+                    elif 'warning' in line_lower:
+                        self.log_output.append(f'<span style="color:#ffa500;">{line}</span>')
+                    elif 'rotation axis' in line_lower or 'cor' in line_lower:
+                        self.log_output.append(f'<span style="color:#4A9EFF;">{line}</span>')
+                    else:
+                        self.log_output.append(f'<span style="color:#ddd;">{line}</span>')
 
         p.readyReadStandardOutput.connect(accumulate_output)
 
