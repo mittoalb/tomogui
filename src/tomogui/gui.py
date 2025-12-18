@@ -4456,6 +4456,10 @@ class TomoGUI(QWidget):
             env.insert("CUDA_VISIBLE_DEVICES", str(gpu_id))
             p.setProcessEnvironment(env)
 
+        # Log the command being executed
+        cmd_str = " ".join([str(arg) for arg in cmd])
+        self.log_output.append(f'<span style="color:#4A9EFF;">🔧 Executing: {cmd_str}</span>')
+
         # Start process
         p.start(str(cmd[0]), [str(a) for a in cmd[1:]])
 
