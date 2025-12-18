@@ -86,25 +86,16 @@ class TomoGUI(QWidget):
         folder_layout.addWidget(self.data_path)
         browse_btn = QPushButton(" Browse Data Folder ")
         browse_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        browse_btn.setToolTip(f"Find folder, update from files status and rot_cen.json")
         browse_btn.clicked.connect(self.browse_data_folder)
         folder_layout.addWidget(browse_btn)
         refresh_btn2 = QPushButton("     Refresh     ")
         refresh_btn2.setStyleSheet("QPushButton { font-size: 10.5pt; }")
         refresh_btn2.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         refresh_btn2.clicked.connect(self.refresh_main_table)      
+        refresh_btn2.setToolTip(f"Update from files status and rot_cen.json")
         folder_layout.addWidget(refresh_btn2)  
         left_layout.addLayout(folder_layout)
-
-        # Projection file
-        #proj_layout = QHBoxLayout()
-        #self.proj_file_box = QComboBox()
-        #self.proj_file_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        #proj_layout.addWidget(QLabel("Projection File:"))
-        #proj_layout.addWidget(self.proj_file_box)
-        #refresh_btn2 = QPushButton("Refresh")
-        #refresh_btn2.clicked.connect(self.refresh_h5_files)
-        #proj_layout.addWidget(refresh_btn2)
-        #left_layout.addLayout(proj_layout)
 
         # ==== TABS (Configs + Params) ====
         self.tabs = QTabWidget()
@@ -328,12 +319,13 @@ class TomoGUI(QWidget):
         self.batch_gpus_per_machine.setFixedWidth(48)
         self.batch_gpus_per_machine.setStyleSheet("QSpinBox { font-size: 10.5pt; }")
         batch_ops.addWidget(self.batch_gpus_per_machine)
-        load_cor_btn = QPushButton("Load COR")
-        load_cor_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
-        load_cor_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        load_cor_btn.setToolTip(f"Load rot_cen.json file, only use before batch process")
-        load_cor_btn.clicked.connect(self.load_cor)
-        batch_ops.addWidget(load_cor_btn)
+        monitor_btn = QPushButton("Monitor")
+        monitor_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        monitor_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        monitor_btn.setToolTip(f"Auto try or full recon")
+        monitor_btn.setVisible(False)  # Unavailable
+        #monitor_btn.clicked.connect(self.monitor)#TODO: to implement
+        batch_ops.addWidget(monitor_btn)
         select_all_btn = QPushButton(" Select all ")
         select_all_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
         select_all_btn.clicked.connect(self._batch_select_all)
@@ -2106,6 +2098,18 @@ class TomoGUI(QWidget):
         self.batch_file_main_table.setRowCount(0)
         self.batch_file_main_list = []
         self.batch_last_clicked_row = None
+        json_path = os.path.join(table_folder,"rot_cen.json")
+        if os.path.exists(json_path):
+            with open(json_path, 'r') as f:
+                try:
+                    self.cor_data = json.load(f)
+                    fns = list(self.cor_data.keys())
+                except json.JSONDecondeError:
+                    self.log_output(f'<span style="color:red;">Error load rot.cen.json, stop</span>')
+                    return
+        else:
+            fns = []
+            self.log_output(f'No rot.cen.json')
         #populate table
         for f in h5_files:
             filename = os.path.basename(f)
@@ -2156,7 +2160,10 @@ class TomoGUI(QWidget):
             self.batch_file_main_table.setItem(row, 1, filename_item)       
 
             # COR value (editable)
-            cor_input = QLineEdit()
+            if f in fns:
+                cor_input = QLineEdit(self.cor_data[f])
+            else:
+                cor_input = QLineEdit()
             cor_input.setPlaceholderText("COR value")
             cor_input.setAlignment(Qt.AlignCenter)
             cor_input.setFixedWidth(80)
@@ -2901,7 +2908,7 @@ class TomoGUI(QWidget):
             if result != QMessageBox.Yes:
                 self.log_output.append("\u26a0\ufe0fNot take COR")
                 return
-        self.cor_data[proj_file] = (cor_value,"Done try")
+        self.cor_data[proj_file] = cor_value
         try:
             with open(json_path, "w") as f:
                 json.dump(self.cor_data, f, indent=2)
@@ -2928,6 +2935,7 @@ class TomoGUI(QWidget):
                 json_data = json.load(f) 
         except Exception as e:
             self.log_output.append(f'<span style="color:red;"> Failed to read JSON: {e}</span>')
+            return
         fn_to_row = {}
         for r in range(self.batch_file_main_table.rowCount()):
             it = self.batch_file_main_table.item(r,1)
@@ -2936,70 +2944,17 @@ class TomoGUI(QWidget):
         self.batch_file_main_table.setSortingEnabled(False)
         self.batch_file_main_table.blockSignals(True)  
         try:
-            for k, (v1,v2) in json_data.items():
+            for k, v in json_data.items():
                 base = os.path.basename(k)
                 row = fn_to_row.get(base,None)
                 cor_widget = self.batch_file_main_table.cellWidget(row, 2)
                 if isinstance(cor_widget, QLineEdit):
-                    cor_widget.setText(str(v1))
-                status_item = self.batch_file_main_table.item(row, 3)
-                if status_item is None:
-                    status_item = QTableWidgetItem()
-                    self.batch_file_main_table.setItem(row, 3, status_item)
-                status_item.setText(str(v2))
-                checkbox_widget = self.batch_file_main_table.cellWidget(row, 0)
-                if checkbox_widget:
-                    if "Done full" in v2:
-                        checkbox_widget.setStyleSheet(
-                            f"QWidget {{ border-left: 6px solid green; }}"
-                            )
-                    elif "Done try" in v2:
-                        checkbox_widget.setStyleSheet(
-                            f"QWidget {{ border-left: 6px solid orange; }}"
-                            )
-                if hasattr(self, "batch_file_main_list") and row < len(self.batch_file_main_list):
-                    if "Done full" in v2:
-                        self.batch_file_main_list[row]["recon_status"] = 'green'
-                    elif "Done try" in v2:
-                        self.batch_file_main_list[row]["recon_status"] = 'orange'
-                        self.batch_file_main_list[row]["status"] = status_item
+                    cor_widget.setText(str(v))
         finally:
                 self.batch_file_main_table.blockSignals(False)
         self.log_output.append(f'<span style="color:green;">JSON loaded</span>')
 
     # ===== IMAGE VIEWING =====
-    def view_raw(self):
-        "use h5py read, assume same structure for aps IMG"
-        proj_file = self.highlight_scan #the scan highlighted in main table full path
-        if not proj_file:
-            self.log_output.append("\u274c No file selected")
-            return
-        raw_fn = proj_file  # fixed: currentData() already carries the full path
-        try:
-            self._raw_h5 = h5py.File(raw_fn, "r")
-        except Exception as e:
-            self.log_output.append(f'<span style="color:red;">\u274c Failed to open H5: {e}</span>')
-            return
-        self.raw_files_num = self._raw_h5['/exchange/data'].shape[0] # number of projections
-        # safe mean to float to avoid uint overflows
-        self.dark = np.array(self._raw_h5['/exchange/data_dark'][:], dtype=np.float32).mean(axis=0)
-        self.flat = np.array(self._raw_h5['/exchange/data_white'][:], dtype=np.float32).mean(axis=0)
-        self._keep_zoom = False
-        self._clear_roi()
-        self._reset_view_state()
-        first_img = self._raw_h5['/exchange/data'][0, :, :]
-        self.set_image_scale(first_img, flag="raw")
-        try:
-            self.slice_slider.valueChanged.disconnect()
-        except TypeError:
-            pass
-        self.slice_slider.setMaximum(self.raw_files_num - 1)
-        self.slice_slider.valueChanged.connect(self.update_raw_slice)
-        # Store the source filename for display
-        self._current_source_file = os.path.basename(raw_fn)
-        self._current_view_mode = "raw"
-        self.update_raw_slice()
-
     def view_try_reconstruction(self):
         data_folder = self.data_path.text().strip()
         proj_file = self.highlight_scan #the scan highlighted in main table full path
