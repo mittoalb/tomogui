@@ -459,8 +459,8 @@ class TomoGUI(QWidget):
 
         # Coordinate label
         self.coord_label = QLabel("")
-        self.coord_label.setFixedWidth(150)
-        self.coord_label.setStyleSheet("font-size: 11pt;")
+        self.coord_label.setMinimumWidth(400)
+        self.coord_label.setStyleSheet("font-size: 11pt; color: white; font-weight: bold;")
         toolbar_row.addWidget(self.coord_label)
 
         # Connect mouse events for VisPy
@@ -2969,9 +2969,12 @@ class TomoGUI(QWidget):
             # Reset camera to fit image
             self.view.camera.set_range()
 
-        # Update title
+        # Update title with clear white text
         if hasattr(self, '_current_source_file') and hasattr(self, '_current_view_mode'):
-            title = f"{self._current_source_file} [{self._current_view_mode}] - {os.path.basename(str(img_path))}"
+            source = self._current_source_file
+            mode = self._current_view_mode.upper()
+            current = os.path.basename(str(img_path))
+            title = f"{source} [{mode}] - {current}"
         else:
             title = os.path.basename(str(img_path))
 
