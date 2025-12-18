@@ -2610,7 +2610,7 @@ class TomoGUI(QWidget):
 
     def full_reconstruction(self):
         proj_file = self.highlight_scan
-        pn = os.path.basename(proj_file)
+        pn = os.path.splitext(os.path.basename(proj_file))[0]
         recon_way = self.recon_way_box_full.currentText()  
         highlight_row = self.highlight_row
         try:
@@ -2653,7 +2653,7 @@ class TomoGUI(QWidget):
         code = self.run_command_live(cmd, proj_file=proj_file, job_label="Full recon", wait=True, cuda_devices=gpu)
         try:
             if code == 0:
-                fullpath = os.path.join(f"{self.data_path}_rec", f"{pn}_rec")
+                fullpath = os.path.join(f"{self.data_path.text()}_rec", f"{pn}_rec")
                 full_files = glob.glob(os.path.join(fullpath, "*.tiff"))
                 num_1 = int(Path(full_files[0]).stem.split("_")[-1])
                 num_2 = int(Path(full_files[-1]).stem.split("_")[-1])
