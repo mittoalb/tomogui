@@ -2104,6 +2104,7 @@ class TomoGUI(QWidget):
                 try:
                     self.cor_data = json.load(f)
                     fns = list(self.cor_data.keys())
+                    self.log_output('Get cors from rot_cen.json')
                 except json.JSONDecondeError:
                     self.log_output(f'<span style="color:red;">Error load rot.cen.json, stop</span>')
                     return
@@ -2921,38 +2922,6 @@ class TomoGUI(QWidget):
         except Exception as e:
             self.log_output.append(f'<span style="color:red;">\u274cFailed to save rot_cen.json: {e}</span>')
             return
-        
-    def load_cor(self):
-        data_folder = self.data_path.text().strip()
-        json_path = os.path.join(data_folder, "rot_cen.json")
-        if not os.path.exists(json_path):
-            self.log_output.append("\u26a0\ufe0f[WARNING] no rot_cen.json, create one")
-            with open(json_path, "w") as f:
-                json.dump(self.cor_data, f, indent=2)
-            return
-        try:
-            with open(json_path, "r") as f:
-                json_data = json.load(f) 
-        except Exception as e:
-            self.log_output.append(f'<span style="color:red;"> Failed to read JSON: {e}</span>')
-            return
-        fn_to_row = {}
-        for r in range(self.batch_file_main_table.rowCount()):
-            it = self.batch_file_main_table.item(r,1)
-            if it:
-                fn_to_row[it.text().strip()] = r
-        self.batch_file_main_table.setSortingEnabled(False)
-        self.batch_file_main_table.blockSignals(True)  
-        try:
-            for k, v in json_data.items():
-                base = os.path.basename(k)
-                row = fn_to_row.get(base,None)
-                cor_widget = self.batch_file_main_table.cellWidget(row, 2)
-                if isinstance(cor_widget, QLineEdit):
-                    cor_widget.setText(str(v))
-        finally:
-                self.batch_file_main_table.blockSignals(False)
-        self.log_output.append(f'<span style="color:green;">JSON loaded</span>')
 
     # ===== IMAGE VIEWING =====
     def view_try_reconstruction(self):
