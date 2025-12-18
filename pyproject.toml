@@ -23,6 +23,7 @@ dependencies = [
 
 [project.scripts]
 tomogui = "tomogui.__main__:main"
+tomogui-volume = "tomogui.volume_viewer:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1737,9 +1737,9 @@ class TomoGUI(QWidget):
 
         # File list table
         self.batch_file_table = QTableWidget()
-        self.batch_file_table.setColumnCount(9)
+        self.batch_file_table.setColumnCount(10)
         self.batch_file_table.setHorizontalHeaderLabels([
-            "Select", "Filename", "Size", "COR", "Status", "View Data", "View Try", "View Full", "Actions"
+            "Select", "Filename", "Size", "COR", "Status", "View Data", "View Try", "View Full", "View 3D", "Actions"
         ])
 
         # Configure table
@@ -1754,7 +1754,8 @@ class TomoGUI(QWidget):
         header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # View Data
         header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # View Try
         header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # View Full
-        header.setSectionResizeMode(8, QHeaderView.ResizeToContents)  # Actions
+        header.setSectionResizeMode(8, QHeaderView.ResizeToContents)  # View 3D
+        header.setSectionResizeMode(9, QHeaderView.ResizeToContents)  # Actions
         header.setSectionsClickable(True)  # Make headers clickable for sorting
 
         # Set initial width for filename column to be wider (can be resized by user)
@@ -3519,6 +3520,11 @@ class TomoGUI(QWidget):
             view_full_btn.clicked.connect(lambda checked, fp=file_path: self._batch_view_full(fp))
             self.batch_file_table.setCellWidget(row, 7, view_full_btn)
 
+            # View 3D button
+            view_3d_btn = QPushButton("View 3D")
+            view_3d_btn.clicked.connect(lambda checked, fp=file_path: self._batch_view_3d(fp))
+            self.batch_file_table.setCellWidget(row, 8, view_3d_btn)
+
             # Actions button
             actions_widget = QWidget()
             actions_layout = QHBoxLayout(actions_widget)
@@ -3535,7 +3541,7 @@ class TomoGUI(QWidget):
             full_btn.clicked.connect(lambda checked, fp=file_path: self._batch_run_full_single(fp))
             actions_layout.addWidget(full_btn)
 
-            self.batch_file_table.setCellWidget(row, 8, actions_widget)
+            self.batch_file_table.setCellWidget(row, 9, actions_widget)
 
             # Apply colored left border indicator based on reconstruction status
             # Create a colored indicator in the checkbox column
@@ -3779,6 +3785,52 @@ class TomoGUI(QWidget):
 
         # Call the existing view full method
         self.view_full_reconstruction()
+
+    def _batch_view_3d(self, file_path):
+        """Open 3D volume viewer for full reconstruction"""
+        data_folder = self.data_path.text().strip()
+        proj_name = os.path.splitext(os.path.basename(file_path))[0]
+        full_dir = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec")
+
+        if not os.path.exists(full_dir):
+            self.log_output.append(f'<span style="color:red;">❌ No full reconstruction folder found: {full_dir}</span>')
+            QMessageBox.warning(self, "No Reconstruction",
+                              f"Full reconstruction not found for:\n{os.path.basename(file_path)}\n\nPlease run full reconstruction first.")
+            return
+
+        # Check if there are TIFF files
+        tiff_files = glob.glob(os.path.join(full_dir, "*.tiff")) + glob.glob(os.path.join(full_dir, "*.tif"))
+        if not tiff_files:
+            self.log_output.append(f'<span style="color:red;">❌ No TIFF files in: {full_dir}</span>')
+            QMessageBox.warning(self, "No TIFF Files",
+                              f"No TIFF files found in:\n{full_dir}")
+            return
+
+        # Import and launch volume viewer
+        try:
+            from .volume_viewer import VolumeViewer
+            self.log_output.append(f'<span style="color:green;">🎬 Opening 3D viewer for {os.path.basename(file_path)}...</span>')
+
+            # Create volume viewer window
+            volume_window = VolumeViewer()
+            volume_window.setWindowTitle(f"3D Volume - {proj_name}")
+            volume_window.current_folder = full_dir
+            volume_window.show()
+
+            # Auto-load the volume
+            volume_window.load_volume_from_folder(full_dir)
+
+            # Store reference to prevent garbage collection
+            if not hasattr(self, '_volume_viewers'):
+                self._volume_viewers = []
+            self._volume_viewers.append(volume_window)
+
+        except ImportError as e:
+            self.log_output.append(f'<span style="color:red;">❌ Failed to import volume viewer: {e}</span>')
+            QMessageBox.critical(self, "Import Error", f"Could not load 3D volume viewer:\n{str(e)}")
+        except Exception as e:
+            self.log_output.append(f'<span style="color:red;">❌ Failed to open 3D viewer: {e}</span>')
+            QMessageBox.critical(self, "Error", f"Failed to open 3D volume viewer:\n{str(e)}")
 
     def _batch_run_try_single(self, file_path):
         """Run try reconstruction on a single file using the queue system"""
