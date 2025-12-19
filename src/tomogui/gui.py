@@ -2196,9 +2196,9 @@ class TomoGUI(QWidget):
                 kind, w, include_cb, _default = self.Geometry_widgets[flag]
                 if include_cb is not None and not include_cb.isChecked():
                     include_cb.setChecked(True)
-        #self.recon_way_box.setCurrentText("recon_steps")
+        self.recon_way_box.setCurrentText("recon_steps")
         self.recon_way_box_full.setCurrentText("recon_steps")
-        self.log_output.append("Enable laminography params, set recon way to recon_steps for full recon")
+        self.log_output.append("Enable laminography params, set recon way to recon_steps for full and try recon")
         #place holder: any params need to disable?
 
     def abort_process(self):
