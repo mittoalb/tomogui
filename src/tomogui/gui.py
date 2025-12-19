@@ -442,7 +442,7 @@ class TomoGUI(QWidget):
             try:
                 self.canvas = scene.SceneCanvas(keys='interactive', show=False)
                 self.view = self.canvas.central_widget.add_view()
-                self.view.camera = scene.PanZoomCamera(aspect=1)
+                self.view.camera = scene.PanZoomCamera()  # Remove fixed aspect ratio to allow proper scaling
                 self.view.camera.flip = (False, True, False)  # Flip Y for image coordinates
                 self.image_visual = visuals.Image(cmap='grays', parent=self.view.scene)
                 self.canvas_widget = self.canvas.native
@@ -2988,8 +2988,9 @@ class TomoGUI(QWidget):
             # Restore previous camera view
             self.view.camera.rect = self._last_camera_rect
         else:
-            # Reset camera to fit image
-            self.view.camera.set_range()
+            # Reset camera to fit image with proper aspect ratio
+            # Set camera rect to (left, top, width, height) to encompass the entire image
+            self.view.camera.rect = (0, 0, w, h)
 
         # Update title with clear white text
         if hasattr(self, '_current_source_file') and hasattr(self, '_current_view_mode'):
