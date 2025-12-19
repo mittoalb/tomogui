@@ -1758,6 +1758,7 @@ class TomoGUI(QWidget):
 
         # Configure table
         self.batch_file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.batch_file_table.setSelectionMode(QAbstractItemView.ExtendedSelection)  # Allow Shift+Click selection
         self.batch_file_table.setSortingEnabled(True)  # Enable column sorting
         header = self.batch_file_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Select checkbox
@@ -1870,6 +1871,12 @@ class TomoGUI(QWidget):
         self.sync_mode_active = False
         self.sync_mode_timer = None
         self.sync_mode_known_files = set()  # Track files we've already seen
+
+        # Initialize autosave timer for COR values
+        from PyQt5.QtCore import QTimer
+        self.cor_autosave_timer = QTimer(self)
+        self.cor_autosave_timer.timeout.connect(self._autosave_cor_values)
+        self.cor_autosave_timer.start(120000)  # 120000 ms = 2 minutes
 
 
     # ===== HELPER METHODS =====
@@ -3630,6 +3637,45 @@ class TomoGUI(QWidget):
             self.log_output.append(f'<span style="color:red;">❌ Failed to save COR CSV: {e}</span>')
             QMessageBox.critical(self, "Error", f"Failed to save COR values:\n{e}")
 
+    def _autosave_cor_values(self):
+        """Autosave COR values to CSV file every 2 minutes (silent)"""
+        folder = self.data_path.text()
+        if not folder or not os.path.isdir(folder):
+            return  # Silent fail if no folder selected
+
+        if not self.batch_file_list:
+            return  # Silent fail if no files
+
+        csv_path = os.path.join(folder, "batch_cor_values.csv")
+
+        try:
+            import csv
+            saved_count = 0
+
+            with open(csv_path, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(['Filename', 'COR'])
+
+                for file_info in self.batch_file_list:
+                    try:
+                        filename = file_info['filename']
+                        cor_value = file_info['cor_input'].text().strip()
+                        writer.writerow([filename, cor_value])
+                        saved_count += 1
+                    except (RuntimeError, KeyError):
+                        # Widget was deleted, skip silently
+                        continue
+
+            # Log quietly to console (not a popup)
+            if saved_count > 0:
+                self.log_output.append(
+                    f'<span style="color:#888; font-size:8pt;">💾 Auto-saved {saved_count} COR values</span>'
+                )
+
+        except Exception:
+            # Silent fail - don't spam user with autosave errors
+            pass
+
     def _batch_load_cor_csv(self, silent=False):
         """Load COR values from CSV file in the data directory"""
         folder = self.data_path.text()
@@ -3692,19 +3738,34 @@ class TomoGUI(QWidget):
                 self.log_output.append(f'<span style="color:red;">❌ Failed to load COR CSV: {e}</span>')
                 QMessageBox.critical(self, "Error", f"Failed to load COR values:\n{e}")
 
+    def _get_selected_files(self):
+        """Get selected files from either checkboxes or table selection"""
+        # Get files selected via checkboxes
+        checkbox_selected = [f for f in self.batch_file_list if f['checkbox'].isChecked()]
+
+        # Get files selected via table row selection (Shift+Click)
+        selected_rows = set(item.row() for item in self.batch_file_table.selectedItems())
+        row_selected = [self.batch_file_list[row] for row in selected_rows if row < len(self.batch_file_list)]
+
+        # Combine both, remove duplicates
+        all_selected = {f['path']: f for f in (checkbox_selected + row_selected)}
+        return list(all_selected.values())
+
     def _batch_select_all(self):
         """Select all files in the batch list"""
         for file_info in self.batch_file_list:
             file_info['checkbox'].setChecked(True)
+        self.batch_file_table.selectAll()
 
     def _batch_deselect_all(self):
         """Deselect all files in the batch list"""
         for file_info in self.batch_file_list:
             file_info['checkbox'].setChecked(False)
+        self.batch_file_table.clearSelection()
 
     def _batch_remove_selected(self):
         """Physically delete selected files from the filesystem"""
-        files_to_remove = [f for f in self.batch_file_list if f['checkbox'].isChecked()]
+        files_to_remove = self._get_selected_files()
 
         if not files_to_remove:
             QMessageBox.warning(self, "Warning", "No files selected.")
@@ -3900,14 +3961,68 @@ class TomoGUI(QWidget):
         # Run through the queue system to prevent memory overflow
         self._run_batch_with_queue([file_info], recon_type='full', num_gpus=num_gpus, machine=machine)
 
+    def _intelligent_cor_fill(self, selected_files):
+        """Intelligently fill missing COR values in selected files using actual table row positions"""
+        # Build a map of file_info to actual table row index
+        file_to_row = {}
+        for row_idx, file_info in enumerate(self.batch_file_list):
+            file_to_row[file_info['path']] = row_idx
+
+        # Collect all existing COR values with their actual table row indices
+        cor_values = []
+        for file_info in selected_files:
+            actual_row = file_to_row.get(file_info['path'])
+            if actual_row is None:
+                continue  # File was removed, skip
+
+            cor_text = file_info['cor_input'].text().strip()
+            if cor_text:
+                try:
+                    cor_val = float(cor_text)
+                    cor_values.append((actual_row, cor_val, file_info['filename']))
+                except ValueError:
+                    pass
+
+        # If no COR values at all, all will use auto mode
+        if not cor_values:
+            self.log_output.append(f'<span style="color:#4A9EFF;">ℹ️  No COR values found, will use AUTO mode for all files</span>')
+            return
+
+        # Fill empty COR fields with nearest available value based on actual table position
+        filled_count = 0
+        for file_info in selected_files:
+            actual_row = file_to_row.get(file_info['path'])
+            if actual_row is None:
+                continue  # File was removed, skip
+
+            cor_text = file_info['cor_input'].text().strip()
+            if not cor_text:
+                # Find closest COR value by actual table row position
+                closest_row, closest_cor, source_filename = min(
+                    cor_values,
+                    key=lambda x: abs(x[0] - actual_row)
+                )
+                file_info['cor_input'].setText(str(closest_cor))
+                filled_count += 1
+                self.log_output.append(
+                    f'<span style="color:#90ee90;">✓ Filled COR for {file_info["filename"]}: '
+                    f'{closest_cor} (from {source_filename} at row {closest_row})</span>'
+                )
+
+        if filled_count > 0:
+            self.log_output.append(f'<span style="color:green;">✓ Auto-filled {filled_count} missing COR value(s)</span>')
+
     def _batch_run_try_selected(self):
         """Run try reconstruction on all selected files with GPU queue management"""
-        selected_files = [f for f in self.batch_file_list if f['checkbox'].isChecked()]
+        selected_files = self._get_selected_files()
         machine = self.batch_machine_box.currentText()
 
         if not selected_files:
             QMessageBox.warning(self, "Warning", "No files selected.")
             return
+
+        # Intelligent COR filling
+        self._intelligent_cor_fill(selected_files)
 
         num_gpus = self.batch_gpus_per_machine.value()
         machine_text = f" on {machine}" if machine != "Local" else ""
@@ -3926,12 +4041,15 @@ class TomoGUI(QWidget):
 
     def _batch_run_full_selected(self):
         """Run full reconstruction on all selected files with GPU queue management"""
-        selected_files = [f for f in self.batch_file_list if f['checkbox'].isChecked()]
+        selected_files = self._get_selected_files()
         machine = self.batch_machine_box.currentText()
 
         if not selected_files:
             QMessageBox.warning(self, "Warning", "No files selected.")
             return
+
+        # Intelligent COR filling
+        self._intelligent_cor_fill(selected_files)
 
         num_gpus = self.batch_gpus_per_machine.value()
         machine_text = f" on {machine}" if machine != "Local" else ""
