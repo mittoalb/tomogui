@@ -4123,10 +4123,8 @@ class TomoGUI(QWidget):
             item = QTableWidgetItem()
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)  # optional
             table.setItem(row, status_col, item)
-
-        item.setText(text)
         if color is not None:
-            item.setBackground(QColor(color))
+            self._update_row(row=row,color=color,status=text)
         return True
 
     def _run_batch_with_queue(self, selected_files, recon_type, num_gpus, machine):
@@ -4145,7 +4143,7 @@ class TomoGUI(QWidget):
         # Mark all jobs as queued (safely handle deleted widgets)
         for f, _, _ in jobs_to_add:
             try:
-                self._set_status_by_filename(f["filename"], "Queued", color="lightgray")
+                self._set_status_by_filename(f["filename"], "Queued", status_col=3,filename_col=1,color="lightgray")
             except RuntimeError:
                 # Widget was deleted, skip status update
                 pass
@@ -4202,8 +4200,9 @@ class TomoGUI(QWidget):
                 QApplication.processEvents()
 
                 # Start job asynchronously
-                process = self._start_batch_job_async(file_info, job_recon_type, gpu_id, job_machine)
-                self.batch_running_jobs[gpu_id] = (process, file_info, job_recon_type)
+                print(f'this is {file_info} before start process')
+                self._start_batch_job_async(file_info, job_recon_type, gpu_id, job_machine)
+                self.batch_running_jobs[gpu_id] = (process, file_info, job_recon_type)  # Add job to running jobs
 
                 self.log_output.append(f'<span style="color:blue;">🚀 GPU {gpu_id}: Started {job_recon_type} - {file_info["filename"]} (Running: {len(self.batch_running_jobs)}, Queued: {len(self.batch_job_queue)})</span>')
 
@@ -4214,6 +4213,7 @@ class TomoGUI(QWidget):
                     # Job finished
                     exit_code = process.exitCode()
                     self.batch_completed_jobs += 1
+                    print(f'this is the exit code {exit_code} when job finishes')
 
                     # Safely update status (widget may have been deleted if list was refreshed)
                     try:
@@ -4336,30 +4336,37 @@ class TomoGUI(QWidget):
         """
         file_path = file_info['path']
         filename = os.path.basename(file_path)
-        if recon_type is 'try':
+        if recon_type == 'try':
             # Get reconstruction parameters from Main tab
             recon_way = self.recon_way_box.currentText()
             cor_val = self.cor_input.text().strip()
-        elif recon_type is 'full':
+            rec_method = self.cor_method_box #"auto or manual"
+            if rec_method == 'manual':
+                try:
+                    cor = float(cor_val)
+                except ValueError:
+                    self.log_output.append(f'<span style="color:red;">❌ Invalid COR value "{cor_val}" for {filename}, break</span>')
+                    return
+        elif recon_type == 'full':
             # Get COR value EXCLUSIVELY from batch table (not from Main tab)
             cor_val = file_info['cor_input'].text().strip()
-
-        if not cor_val:
-            self.log_output.append(f'<span style="color:orange;">⚠️  No COR value in batch table for {filename}, skipping</span>')
-            # Return a dummy finished process
-            p = QProcess(self)
-            p.start("echo", ["skipped"])
-            p.waitForFinished()
-            return p
-
-        try:
-            cor = float(cor_val)
-        except ValueError:
-            self.log_output.append(f'<span style="color:red;">❌ Invalid COR value "{cor_val}" for {filename}, skipping</span>')
-            p = QProcess(self)
-            p.start("echo", ["skipped"])
-            p.waitForFinished()
-            return p
+            rec_method = self.cor_full_method
+            #if there is no cor_val in the table for full recon
+            if not cor_val:
+                self.log_output.append(f'<span style="color:orange;">⚠️  No COR value in batch table for {filename}, skipping</span>')
+                # Return a dummy finished process
+                p = QProcess(self)
+                p.start("echo", ["skipped"])
+                p.waitForFinished()
+                return p
+            try:
+                cor = float(cor_val)
+            except ValueError:
+                self.log_output.append(f'<span style="color:red;">❌ Invalid COR value "{cor_val}" for {filename}, skipping</span>')
+                p = QProcess(self)
+                p.start("echo", ["skipped"])
+                p.waitForFinished()
+                return p
 
         # Build command
         # Batch tab ALWAYS uses manual COR with the value from the batch table
@@ -4378,14 +4385,34 @@ class TomoGUI(QWidget):
                    "--rotation-axis-auto", "manual",
                    "--rotation-axis", str(cor)]
         else:
-            cmd = ["tomocupy", str(recon_way),
-                   "--reconstruction-type", recon_type,
-                   "--file-name", file_path,
-                   "--rotation-axis-auto", "manual",
-                   "--rotation-axis", str(cor)]
+            if recon_type == 'try' and rec_method == "auto":
+                cmd = ["tomocupy", str(recon_way),
+                    "--reconstruction-type", recon_type,
+                    "--file-name", file_path,
+                    "--rotation-axis-auto", rec_method]
+            elif recon_type == 'try' and rec_method == "manual":
+                print(f'this is recon_type {recon_type} and rec_method {rec_method}')
+                cmd = ["tomocupy", str(recon_way),
+                    "--reconstruction-type", recon_type,
+                    "--file-name", file_path,
+                    "--rotation-axis-auto", rec_method,
+                    "--rotation-axis", str(cor)]      
+            elif recon_type == 'full' and rec_method == "auto":
+                cmd = ["tomocupy", str(recon_way),
+                    "--reconstruction-type", recon_type,
+                    "--file-name", file_path,
+                    "--rotation-axis-auto", rec_method,
+                    "--rotation-axis", str(cor)]  
+            elif recon_type == 'full' and rec_method == 'manual':
+                cmd = ["tomocupy", str(recon_way),
+                    "--reconstruction-type", recon_type,
+                    "--file-name", file_path,
+                    "--rotation-axis-auto", rec_method,
+                    "--rotation-axis", str(cor)]  
+                
 
         # Wrap for remote execution if needed
-        cmd = self._get_batch_machine_command(cmd, machine)
+        self._get_batch_machine_command(cmd, machine)
 
         # Create and configure process
         p = QProcess(self)
