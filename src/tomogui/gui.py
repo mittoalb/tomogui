@@ -280,17 +280,17 @@ class TomoGUI(QWidget):
         self.batch_file_main_table.setHorizontalHeaderLabels(["Select","File Name", "COR", 
                                                          "Status", "Size", "Actions"])
         self.batch_file_main_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.batch_file_main_table.setSortingEnabled(True)  # Enable column sorting
+        #self.batch_file_main_table.setSortingEnabled(True)  # Enable column sorting
         header = self.batch_file_main_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)  # Allow user to resize columns
         header.setSectionResizeMode(0, QHeaderView.Stretch)  # Select checkbox
         header.setSectionResizeMode(1, QHeaderView.Interactive)  # Filename - user can resize
         header.setSectionResizeMode(2, QHeaderView.Stretch)  # COR
-        header.setSectionResizeMode(3, QHeaderView.Stretch)  # Status
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Status
         header.setSectionResizeMode(4, QHeaderView.Stretch)  # Size
         header.setSectionResizeMode(5, QHeaderView.Stretch)  # Actions
-        header.setSectionsClickable(True)  # Make headers clickable for sorting
-        self.batch_file_main_table.setColumnWidth(1, 350) # Set initial width for filename column to be wider (can be resized by user)    
+        #header.setSectionsClickable(True)  # Make headers clickable for sorting
+        self.batch_file_main_table.setColumnWidth(1, 300) # Set initial width for filename column to be wider (can be resized by user)    
         main_tab.addWidget(self.batch_file_main_table)
         #Row 5: batch process operations
         batch_ops = QHBoxLayout()
@@ -2550,8 +2550,8 @@ class TomoGUI(QWidget):
         cor_val = self.cor_input.text().strip()
         if cor_method == "auto":
             if cor_val:
-                self.log_output.append(f'<span style="color:red;">\u274c no manual cor for auto method</span>')
-                return
+                self.log_output.append(f'<span style="color:orange;">\u274c use auto method, ignore input cor</span>')
+                pass
         else:
             try:
                 cor = float(cor_val)
@@ -4124,35 +4124,42 @@ class TomoGUI(QWidget):
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)  # optional
             table.setItem(row, status_col, item)
         if color is not None:
-            self._update_row(row=row,color=color,status=text)
+            self.batch_file_main_list[row]['recon_status'] = color
+            checkbox_widget = self.batch_file_main_table.cellWidget(row, 0)
+            if checkbox_widget:
+                checkbox_widget.setStyleSheet(f"QWidget {{ border-left: 6px solid {color}; }}")
+            status_item = QTableWidgetItem(text)
+            self.batch_file_main_table.setItem(row, 3, status_item)
+            self.batch_file_main_list[row]['status'] = text
         return True
 
     def _run_batch_with_queue(self, selected_files, recon_type, num_gpus, machine):
         """
         Run batch reconstructions with GPU queue management
-
-        Args:
-            selected_files: List of file info dictionaries
-            recon_type: 'try' or 'full'
-            num_gpus: Number of GPUs to use in parallel
-            machine: Target machine name
         """
-        # Add jobs to queue with their type and machine info
+        # <<< CHANGED: validate early; do NOT open progress window if invalid
+        if not selected_files:
+            self.log_output.append('<span style="color:red;">❌ No files selected.</span>')
+            return
+
         jobs_to_add = [(f, recon_type, machine) for f in selected_files]
 
-        # Mark all jobs as queued (safely handle deleted widgets)
+        # Mark all jobs as queued
         for f, _, _ in jobs_to_add:
             try:
-                self._set_status_by_filename(f["filename"], "Queued", status_col=3,filename_col=1,color="lightgray")
+                self._set_status_by_filename(
+                    os.path.basename(f["filename"]), "Queued", status_col=3, filename_col=1, color="blue"
+                )
             except RuntimeError:
-                # Widget was deleted, skip status update
                 pass
 
         # If queue is already running, just add to it
         if self.batch_running:
             self.batch_job_queue.extend(jobs_to_add)
             self.batch_total_jobs += len(selected_files)
-            self.log_output.append(f'<span style="color:blue;">➕ Added {len(selected_files)} job(s) to running queue</span>')
+            self.log_output.append(
+                f'<span style="color:blue;">➕ Added {len(selected_files)} job(s) to running queue</span>'
+            )
             self.batch_queue_label.setText(f"Queue: {len(self.batch_job_queue)} jobs waiting")
             return
 
@@ -4161,7 +4168,7 @@ class TomoGUI(QWidget):
         self.batch_stop_btn.setEnabled(True)
         self.batch_job_queue = jobs_to_add
         self.batch_running_jobs = {}
-        self.batch_available_gpus = list(range(num_gpus))  # GPUs 0, 1, 2, etc.
+        self.batch_available_gpus = list(range(num_gpus))
         self.batch_current_machine = machine
         self.batch_current_num_gpus = num_gpus
 
@@ -4170,75 +4177,108 @@ class TomoGUI(QWidget):
 
         self.batch_status_label.setText(f"Starting batch queue on {machine} with {num_gpus} GPU(s)")
         self.batch_progress_bar.setValue(0)
-        self.log_output.append(f'<span style="color:green;">🔧 Queue started with {num_gpus} GPU(s): {self.batch_available_gpus}</span>')
+        self.batch_queue_label.setText(f"Queue: {len(self.batch_job_queue)} jobs waiting")
         QApplication.processEvents()
-        
-        self.progress_window.show()
-        self.progress_window.start_progress()
-        print(self.batch_job_queue)
+
+        progress_window_opened = False  # <<< CHANGED: gate progress window
+
         # Keep processing until queue is empty and all jobs are done
         while self.batch_job_queue or self.batch_running_jobs:
             # Start new jobs if GPUs are available and jobs are queued
             while self.batch_available_gpus and self.batch_job_queue:
                 gpu_id = self.batch_available_gpus.pop(0)
-                job_tuple = self.batch_job_queue.pop(0)
-                file_info, job_recon_type, job_machine = job_tuple
-                # Update status (safely handle deleted widgets)
+                file_info, job_recon_type, job_machine = self.batch_job_queue.pop(0)
+
                 try:
                     self._set_status_by_filename(
-                    file_info["filename"],
-                    f"Running on GPU {gpu_id}",
-                    status_col=3,
-                    filename_col=1,
-                    color="blue"
+                        os.path.basename(file_info["filename"]),
+                        f"Running on GPU {gpu_id}",
+                        status_col=3,
+                        filename_col=1,
+                        color="yellow"
                     )
                 except RuntimeError:
-                    # Widget was deleted, skip status update
                     pass
-                queue_len = len(self.batch_job_queue)
-                self.batch_queue_label.setText(f"Queue: {queue_len} jobs waiting")
+
+                self.batch_queue_label.setText(f"Queue: {len(self.batch_job_queue)} jobs waiting")
                 QApplication.processEvents()
 
-                # Start job asynchronously
-                print(f'this is {file_info} before start process')
-                self._start_batch_job_async(file_info, job_recon_type, gpu_id, job_machine)
-                self.batch_running_jobs[gpu_id] = (process, file_info, job_recon_type)  # Add job to running jobs
+                # <<< FIX: CAPTURE return value (process) and validate it
+                try:
+                    process = self._start_batch_job_async(file_info, job_recon_type, gpu_id, job_machine)  # <<< FIX
+                except Exception as e:
+                    self.log_output.append(
+                        f'<span style="color:red;">❌ Failed to start job for {file_info.get("filename","?")}: {e}</span>'
+                    )
+                    # Put GPU back and mark failed
+                    self.batch_available_gpus.append(gpu_id)
+                    self.batch_available_gpus.sort()
+                    try:
+                        self._set_status_by_filename(
+                            os.path.basename(file_info["filename"]), "Ready", 3, 1, color="red"
+                        )
+                    except RuntimeError:
+                        pass
+                    continue  # <<< CHANGED: continue queue
 
-                self.log_output.append(f'<span style="color:blue;">🚀 GPU {gpu_id}: Started {job_recon_type} - {file_info["filename"]} (Running: {len(self.batch_running_jobs)}, Queued: {len(self.batch_job_queue)})</span>')
+                if process is None or not isinstance(process, QProcess):  # <<< CHANGED
+                    self.log_output.append(
+                        f'<span style="color:red;">❌ _start_batch_job_async did not return QProcess for {file_info.get("filename","?")}</span>'
+                    )
+                    self.batch_available_gpus.append(gpu_id)
+                    self.batch_available_gpus.sort()
+                    try:
+                        self._set_status_by_filename(os.path.basename(file_info["filename"]), "Start Failed", 3, 1, color="red")
+                    except RuntimeError:
+                        pass
+                    continue
+
+                # <<< CHANGED: open progress window ONLY after first process starts successfully
+                if not progress_window_opened:
+                    self.progress_window.batch_progress_bar.setValue(0)
+                    self.progress_window.batch_queue_label.setText(f"Queue: {len(self.batch_job_queue)} jobs waiting")
+                    self.progress_window.batch_status_label.setText("Running batch jobs…")
+                    self.progress_window.show()
+                    progress_window_opened = True
+
+                self.batch_running_jobs[gpu_id] = (process, file_info, job_recon_type)
+                print(f'should show {self.batch_running_jobs}')
+
+                self.log_output.append(
+                    f'<span style="color:blue;">🚀 GPU {gpu_id}: Started {job_recon_type} - {file_info["filename"]} '
+                    f'(Running: {len(self.batch_running_jobs)}, Queued: {len(self.batch_job_queue)})</span>'
+                )
 
             # Check for completed jobs
             completed_gpus = []
             for gpu_id, (process, file_info, job_recon_type) in list(self.batch_running_jobs.items()):
                 if process.state() == QProcess.NotRunning:
-                    # Job finished
                     exit_code = process.exitCode()
                     self.batch_completed_jobs += 1
-                    print(f'this is the exit code {exit_code} when job finishes')
 
-                    # Safely update status (widget may have been deleted if list was refreshed)
                     try:
                         if exit_code == 0:
                             self._set_status_by_filename(
-                                file_info["filename"],
+                                os.path.basename(file_info["filename"]),
                                 f"Done try",
                                 status_col=3,
                                 filename_col=1,
                                 color="orange"
-                                    )
+                            )
                             self.log_output.append(f'<span style="color:green;">✅ GPU {gpu_id} finished: {file_info["filename"]}</span>')
-                            # Update row color based on new reconstruction status
                         else:
                             self._set_status_by_filename(
-                                file_info["filename"],
-                                f"Failed try",
+                                os.path.basename(file_info["filename"]),
+                                f"{job_recon_type.capitalize()} Failed",
                                 status_col=3,
                                 filename_col=1,
                                 color="red"
                             )
                             self.log_output.append(f'<span style="color:red;">❌ GPU {gpu_id} failed: {file_info["filename"]}</span>')
                     except RuntimeError:
-                        # Widget was deleted (e.g., user refreshed the list)
-                        self.log_output.append(f'<span style="color:gray;">✅ GPU {gpu_id} finished: {file_info["filename"]} (widget deleted)</span>')
+                        self.log_output.append(
+                            f'<span style="color:gray;">✅ GPU {gpu_id} finished: {file_info["filename"]} (widget deleted)</span>'
+                        )
 
                     completed_gpus.append(gpu_id)
 
@@ -4249,33 +4289,41 @@ class TomoGUI(QWidget):
                 self.batch_available_gpus.sort()
 
             # Update progress
-            if self.batch_total_jobs > 0:
-                progress = int((self.batch_completed_jobs / self.batch_total_jobs) * 100)
-            else:
-                progress = 0
+            progress = int((self.batch_completed_jobs / self.batch_total_jobs) * 100) if self.batch_total_jobs else 0
             self.batch_progress_bar.setValue(progress)
-            self.progress_window.batch_progress_bar.setValue(progress)  # UPDATE: Sync Progress Bar
-            # Show which GPUs are active
-            active_gpus = sorted(self.batch_running_jobs.keys())
-            gpu_status = f"GPUs: {active_gpus}" if active_gpus else "GPUs: idle"
 
-            self.batch_status_label.setText(
-                f"Completed {self.batch_completed_jobs}/{self.batch_total_jobs} | {gpu_status} ({len(self.batch_running_jobs)} running) | Queue: {len(self.batch_job_queue)}"
-            )
+            if progress_window_opened:
+                self.progress_window.batch_progress_bar.setValue(progress)
+                active_gpus = sorted(self.batch_running_jobs.keys())
+                gpu_status = f"GPUs: {active_gpus}" if active_gpus else "GPUs: idle"
+                self.batch_status_label.setText(
+                    f"Completed {self.batch_completed_jobs}/{self.batch_total_jobs} | {gpu_status} | Queue: {len(self.batch_job_queue)}"
+                )
+                self.progress_window.batch_status_label.setText(
+                    f"Completed {self.batch_completed_jobs}/{self.batch_total_jobs} | {gpu_status} | Queue: {len(self.batch_job_queue)}"
+                )
+                self.progress_window.batch_queue_label.setText(f"Queue: {len(self.batch_job_queue)} jobs waiting")
 
             QApplication.processEvents()
 
-            # Small delay to prevent CPU spinning
             if self.batch_running_jobs:
                 import time
-                time.sleep(0.1)
+                time.sleep(0.2)
 
+        # Finalize
         self.batch_progress_bar.setValue(100)
         self.batch_status_label.setText(f"Batch queue complete: {self.batch_completed_jobs} files processed on {self.batch_current_machine}")
         self.batch_queue_label.setText("Queue: 0 jobs waiting")
         self.batch_running = False
         self.batch_stop_btn.setEnabled(False)
+
+        if progress_window_opened:
+            self.progress_window.batch_progress_bar.setValue(100)
+            self.progress_window.batch_status_label.setText("Batch completed.")
+            self.progress_window.batch_queue_label.setText("Queue: 0 jobs waiting")
+
         self.log_output.append(f'<span style="color:green;">🏁 Batch queue finished: {self.batch_completed_jobs} files completed</span>')
+
 
     def _batch_stop_queue(self):
         """Stop the batch queue and kill all running processes"""
@@ -4324,52 +4372,57 @@ class TomoGUI(QWidget):
     def _start_batch_job_async(self, file_info, recon_type, gpu_id, machine):
         """
         Start a reconstruction job asynchronously
-
-        Args:
-            file_info: File information dictionary
-            recon_type: 'try' or 'full'
-            gpu_id: GPU ID to use
-            machine: Target machine
-
-        Returns:
-            QProcess object
+        Returns: QProcess object
         """
         file_path = file_info['path']
         filename = os.path.basename(file_path)
+
+        # properly read method text from combo box
         if recon_type == 'try':
-            # Get reconstruction parameters from Main tab
-            recon_way = self.recon_way_box.currentText()
+            recon_way = self.recon_way_box.currentText()  # <<< CHANGED
             cor_val = self.cor_input.text().strip()
-            rec_method = self.cor_method_box #"auto or manual"
+            rec_method = self.cor_method_box.currentText()  # <<< FIX (was widget object)
             if rec_method == 'manual':
                 try:
                     cor = float(cor_val)
                 except ValueError:
-                    self.log_output.append(f'<span style="color:red;">❌ Invalid COR value "{cor_val}" for {filename}, break</span>')
-                    return
+                    self.log_output.append(
+                        f'<span style="color:red;">❌ Invalid COR value "{cor_val}" for {filename}, skipping</span>'
+                    )
+                    return None  # <<< CHANGED: return None to indicate failure
+
         elif recon_type == 'full':
-            # Get COR value EXCLUSIVELY from batch table (not from Main tab)
+            recon_way = self.recon_way_box_full.currentText()  # <<< FIX (recon_way was undefined)
             cor_val = file_info['cor_input'].text().strip()
-            rec_method = self.cor_full_method
-            #if there is no cor_val in the table for full recon
+            rec_method = self.cor_full_method.currentText()  # <<< FIX (was widget object)
+
             if not cor_val:
-                self.log_output.append(f'<span style="color:orange;">⚠️  No COR value in batch table for {filename}, skipping</span>')
-                # Return a dummy finished process
-                p = QProcess(self)
-                p.start("echo", ["skipped"])
-                p.waitForFinished()
-                return p
-            try:
-                cor = float(cor_val)
-            except ValueError:
-                self.log_output.append(f'<span style="color:red;">❌ Invalid COR value "{cor_val}" for {filename}, skipping</span>')
+                self.log_output.append(
+                    f'<span style="color:orange;">⚠️ No COR value in batch table for {filename}, skipping</span>'
+                )
+                # Return a finished dummy process so queue advances cleanly
                 p = QProcess(self)
                 p.start("echo", ["skipped"])
                 p.waitForFinished()
                 return p
 
+            try:
+                cor = float(cor_val)
+            except ValueError:
+                self.log_output.append(
+                    f'<span style="color:red;">❌ Invalid COR value "{cor_val}" for {filename}, skipping</span>'
+                )
+                p = QProcess(self)
+                p.start("echo", ["skipped"])
+                p.waitForFinished()
+                return p
+        else:
+            self.log_output.append(
+                f'<span style="color:red;">❌ Unknown recon_type "{recon_type}"</span>'
+            )
+            return None  # <<< CHANGED
+
         # Build command
-        # Batch tab ALWAYS uses manual COR with the value from the batch table
         if self.use_conf_box.isChecked():
             config_editor = self.config_editor_try if recon_type == 'try' else self.config_editor_full
             config_text = config_editor.toPlainText()
@@ -4378,47 +4431,49 @@ class TomoGUI(QWidget):
             with open(temp_conf, "w") as f:
                 f.write(config_text)
 
-            cmd = ["tomocupy", str(recon_way),
-                   "--reconstruction-type", recon_type,
-                   "--config", temp_conf,
-                   "--file-name", file_path,
-                   "--rotation-axis-auto", "manual",
-                   "--rotation-axis", str(cor)]
+            # <<< CHANGED: always build cmd deterministically
+            if rec_method == "manual":
+                cmd = [
+                    "tomocupy", str(recon_way),
+                    "--reconstruction-type", recon_type,
+                    "--config", temp_conf,
+                    "--file-name", file_path,
+                    "--rotation-axis-auto", "manual",
+                    "--rotation-axis", str(cor)
+                ]
+            else:
+                cmd = [
+                    "tomocupy", str(recon_way),
+                    "--reconstruction-type", recon_type,
+                    "--config", temp_conf,
+                    "--file-name", file_path,
+                    "--rotation-axis-auto", "auto"
+                ]
         else:
-            if recon_type == 'try' and rec_method == "auto":
-                cmd = ["tomocupy", str(recon_way),
+            if rec_method == "manual":
+                cmd = [
+                    "tomocupy", str(recon_way),
                     "--reconstruction-type", recon_type,
                     "--file-name", file_path,
-                    "--rotation-axis-auto", rec_method]
-            elif recon_type == 'try' and rec_method == "manual":
-                print(f'this is recon_type {recon_type} and rec_method {rec_method}')
-                cmd = ["tomocupy", str(recon_way),
+                    "--rotation-axis-auto", "manual",
+                    "--rotation-axis", str(cor)
+                ]
+            else:
+                cmd = [
+                    "tomocupy", str(recon_way),
                     "--reconstruction-type", recon_type,
                     "--file-name", file_path,
-                    "--rotation-axis-auto", rec_method,
-                    "--rotation-axis", str(cor)]      
-            elif recon_type == 'full' and rec_method == "auto":
-                cmd = ["tomocupy", str(recon_way),
-                    "--reconstruction-type", recon_type,
-                    "--file-name", file_path,
-                    "--rotation-axis-auto", rec_method,
-                    "--rotation-axis", str(cor)]  
-            elif recon_type == 'full' and rec_method == 'manual':
-                cmd = ["tomocupy", str(recon_way),
-                    "--reconstruction-type", recon_type,
-                    "--file-name", file_path,
-                    "--rotation-axis-auto", rec_method,
-                    "--rotation-axis", str(cor)]  
-                
+                    "--rotation-axis-auto", "auto"
+                ]
 
-        # Wrap for remote execution if needed
-        self._get_batch_machine_command(cmd, machine)
+        # <<< FIX: assign wrapped cmd (previously return value was ignored)
+        cmd = self._get_batch_machine_command(cmd, machine)  # <<< FIX
 
         # Create and configure process
         p = QProcess(self)
         p.setProcessChannelMode(QProcess.ForwardedChannels)
 
-        # Set CUDA_VISIBLE_DEVICES for GPU assignment (only for local execution)
+        # Set CUDA_VISIBLE_DEVICES for GPU assignment (local only)
         if machine == "Local":
             env = QProcessEnvironment.systemEnvironment()
             env.insert("CUDA_VISIBLE_DEVICES", str(gpu_id))
@@ -4426,8 +4481,8 @@ class TomoGUI(QWidget):
 
         # Start process
         p.start(str(cmd[0]), [str(a) for a in cmd[1:]])
-
         return p
+
 
     # ===== THEME METHODS =====
 
