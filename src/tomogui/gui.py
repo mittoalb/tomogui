@@ -51,6 +51,11 @@ class TomoGUI(QWidget):
 
         #initialize progress bar for batch process
         self.progress_window = ProgressWindow(self)
+        #stop button in progress window stops the same batch queue
+        try:
+            self.progress_window.stop_requested.connect(self._batch_stop_queue)
+        except Exception:
+            pass
 
         # State
         self.default_cmap = "gray"
@@ -4233,13 +4238,18 @@ class TomoGUI(QWidget):
                         pass
                     continue
 
-                # <<< CHANGED: open progress window ONLY after first process starts successfully
+                # open progress window ONLY after first process starts successfully
                 if not progress_window_opened:
                     self.progress_window.batch_progress_bar.setValue(0)
                     self.progress_window.batch_queue_label.setText(f"Queue: {len(self.batch_job_queue)} jobs waiting")
                     self.progress_window.batch_status_label.setText("Running batch jobs…")
                     self.progress_window.show()
                     progress_window_opened = True
+                    #enable Stop button in the progress window
+                    try:
+                        self.progress_window.set_running(True)
+                    except Exception:
+                        pass
 
                 self.batch_running_jobs[gpu_id] = (process, file_info, job_recon_type)
                 print(f'should show {self.batch_running_jobs}')
@@ -4368,7 +4378,18 @@ class TomoGUI(QWidget):
         self.batch_status_label.setText("Batch queue stopped by user")
         self.batch_queue_label.setText("Queue: 0 jobs waiting")
         self.log_output.append(f'<span style="color:orange;">🛑 Batch queue stopped by user</span>')
+        #mirror stop state to the progress window if open
+        try:
+            if hasattr(self, "progress_window") and self.progress_window is not None:
+                self.progress_window.set_running(False)
+                self.progress_window.set_progress(0)
+                self.progress_window.set_status("Batch queue stopped by user")
+                self.progress_window.set_queue(0)
+        except Exception:
+            pass
 
+        self.log_output.append(f'<span style="color:orange;">🛑 Batch queue stopped by user</span>')
+        
     def _start_batch_job_async(self, file_info, recon_type, gpu_id, machine):
         """
         Start a reconstruction job asynchronously

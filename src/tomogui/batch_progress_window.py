@@ -1,8 +1,8 @@
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QGroupBox, QProgressBar, QLabel, QPushButton
 from PyQt5.QtCore import QTimer, pyqtSignal
 
-stop_requested = pyqtSignal()
 class ProgressWindow(QDialog):
+    stop_requested = pyqtSignal()
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -36,41 +36,18 @@ class ProgressWindow(QDialog):
         # Connect stop button
         self.batch_stop_btn.clicked.connect(self.stop_requested.emit)
 
-        # Timer to simulate progress updates
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.update_progress)
+    def set_running(self, running: bool):
+        """Enable/disable the stop button depending on batch state."""
+        self.batch_stop_btn.setEnabled(bool(running))
 
-        # Keep track of progress
-        self.current_value = 0
-        self.is_running = False
+    def set_progress(self, value: int):
+        try:
+            self.batch_progress_bar.setValue(int(value))
+        except Exception:
+            pass
 
-    def start_progress(self):
-        """ Start the timer to simulate the progress bar's progress """
-        self.is_running = True
-        self.timer.start(100)  # Update progress every 100ms
-        self.batch_stop_btn.setEnabled(True)  # Enable stop button
+    def set_status(self, text: str):
+        self.batch_status_label.setText(str(text))
 
-    def stop_batch(self):
-        """ Stop the batch process when stop button is clicked """
-        self.is_running = False
-        self.timer.stop()  # Stop progress updates
-        self.batch_stop_btn.setEnabled(False)  # Disable stop button
-        self.batch_status_label.setText("Batch stopped.")
-
-    def update_progress(self):
-        """ Update progress bar and labels based on batch status """
-        if self.is_running:
-            # Update progress value
-            self.current_value += 1
-            if self.current_value > 100:
-                self.current_value = 100
-                self.timer.stop()  # Stop the timer once 100% is reached
-                self.batch_status_label.setText("Batch completed")
-
-            # Update the progress bar and status label
-            self.batch_progress_bar.setValue(self.current_value)
-            self.batch_status_label.setText(f"Progress: {self.current_value}%")
-
-    def update_queue_label(self, queue_size):
-        """ Update the queue label to show remaining jobs """
-        self.batch_queue_label.setText(f"Queue: {queue_size} jobs waiting")
+    def set_queue(self, queue_size: int):
+        self.batch_queue_label.setText(f"Queue: {int(queue_size)} jobs waiting")
