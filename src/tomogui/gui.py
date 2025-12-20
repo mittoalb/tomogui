@@ -280,19 +280,18 @@ class TomoGUI(QWidget):
                                                 """)
         self.batch_file_main_table.setColumnCount(6)
         self.batch_file_main_table.setHorizontalHeaderLabels(["Select","File Name", "COR", 
-                                                         "Status", "Size", "Actions"])
+                                                         "Status", "Size", "Pixel"])
         self.batch_file_main_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        #self.batch_file_main_table.setSortingEnabled(True)  # Enable column sorting
         header = self.batch_file_main_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)  # Allow user to resize columns
-        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Select checkbox
+        header.setSectionResizeMode(0, QHeaderView.Fixed)  # Select checkbox
         header.setSectionResizeMode(1, QHeaderView.Interactive)  # Filename - user can resize
         header.setSectionResizeMode(2, QHeaderView.Stretch)  # COR
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Status
         header.setSectionResizeMode(4, QHeaderView.Stretch)  # Size
         header.setSectionResizeMode(5, QHeaderView.Stretch)  # Actions
-        #header.setSectionsClickable(True)  # Make headers clickable for sorting
-        self.batch_file_main_table.setColumnWidth(1, 300) # Set initial width for filename column to be wider (can be resized by user)    
+        self.batch_file_main_table.setColumnWidth(0,50)
+        self.batch_file_main_table.setColumnWidth(1, 350) # Set initial width for filename column to be wider (can be resized by user)    
         main_tab.addWidget(self.batch_file_main_table)
         #Row 5: batch process operations
         batch_ops = QHBoxLayout()
@@ -360,184 +359,6 @@ class TomoGUI(QWidget):
         log_box.addWidget(self.log_output)
         main_tab.addLayout(log_box)   
 
-        '''
-        main_rows = QHBoxLayout()
-        main_rows.setSpacing(3)
-        #left frame for Try
-        try_box = QGroupBox("Try Reconstruction")
-        try_form = QFormLayout()
-        #left - row 1
-        try_cuda_layout = QHBoxLayout()
-        try_cuda_layout.addWidget(QLabel("Recon method"))
-        self.recon_way_box = QComboBox()
-        self.recon_way_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.recon_way_box.addItems(["recon","recon_steps"])
-        self.recon_way_box.setCurrentIndex(0) # make recon as default
-        try_cuda_layout.addWidget(self.recon_way_box)
-        try_cuda_layout.addWidget(QLabel("cuda"))
-        self.cuda_box_try = QComboBox()
-        self.cuda_box_try.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.cuda_box_try.addItems(["0","1"])
-        self.cuda_box_try.setCurrentIndex(0) # make cuda 0 as default
-        try_cuda_layout.addWidget(self.cuda_box_try)
-        try_form.addRow(try_cuda_layout)
-        #row 2
-        self.cor_method_box = QComboBox()
-        self.cor_method_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.cor_method_box.addItems(["auto","manual"])
-        self.cor_method_box.setCurrentIndex(1) # make manual as default
-        try_form.addRow("COR method",self.cor_method_box)
-        #row 3
-        self.cor_input = QLineEdit()
-        self.cor_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        try_form.addRow("COR", self.cor_input)
-        #row 4: Try, View Try buttons
-        try_btn_layout = QHBoxLayout()
-        try_btn = QPushButton("Try")
-        try_btn.clicked.connect(self.try_reconstruction)
-        view_try_btn = QPushButton("View Try")
-        view_try_btn.clicked.connect(self.view_try_reconstruction)
-        try_btn_layout.addWidget(try_btn)
-        try_btn_layout.addWidget(view_try_btn)
-        try_form.addRow(try_btn_layout)
-        #row 5 - batch try: start, end, batch try btn
-        batch_try_layout = QHBoxLayout()
-        batch_try_layout.addWidget(QLabel("Start:"))
-        self.start_scan_input = QLineEdit()
-        batch_try_layout.addWidget(self.start_scan_input)
-        batch_try_layout.addWidget(QLabel("End:"))
-        self.end_scan_input = QLineEdit()
-        batch_try_layout.addWidget(self.end_scan_input)
-        batch_try_btn = QPushButton("Batch Try")
-        batch_try_btn.clicked.connect(self.batch_try_reconstruction)
-        batch_try_layout.addWidget(batch_try_btn)
-        try_form.addRow(batch_try_layout)
-        #left - row 6: prj, help, abort btn
-        others = QGroupBox("Others")
-        others_form = QFormLayout()
-
-        others_layout_1 = QHBoxLayout()
-        view_prj_btn = QPushButton("View raw")
-        view_prj_btn.clicked.connect(self.view_raw)
-        help_tomo_btn = QPushButton("help")
-        help_tomo_btn.clicked.connect(self.help_tomo)
-        help_tomo_btn.setStyleSheet("color: green;")
-        abort_btn = QPushButton("Abort")
-        abort_btn.clicked.connect(self.abort_process)
-        abort_btn.setStyleSheet("color: red;")
-        others_layout_1.addWidget(view_prj_btn)
-        others_layout_1.addWidget(help_tomo_btn)
-        others_layout_1.addWidget(abort_btn)
-        others_form.addRow(others_layout_1)
-        #left - row 7: preset parameters for recon
-        others_layout_2 = QHBoxLayout()
-        bhd_btn = QPushButton("BeamHarden") # preset for absorption recon
-        bhd_btn.setEnabled(True) #enable
-        bhd_btn.clicked.connect(self.preset_beamhardening)
-        phase_btn = QPushButton("Phase") # preset for phase recon
-        phase_btn.setEnabled(True) #enable
-        phase_btn.clicked.connect(self.preset_phase)
-        lami_btn = QPushButton("Laminography") # preset for Laminography recon
-        lami_btn.setEnabled(True) #enable
-        lami_btn.clicked.connect(self.preset_laminography)
-        others_layout_2.addWidget(bhd_btn)
-        others_layout_2.addWidget(phase_btn)
-        others_layout_2.addWidget(lami_btn)
-        others_form.addRow(others_layout_2)
-        #left - row 8: more functions
-        others_layout_3 = QHBoxLayout()
-        save_param_btn = QPushButton("Save params")
-        save_param_btn.setEnabled(True) #enable
-        save_param_btn.clicked.connect(self.save_params_to_file)
-        load_param_btn = QPushButton("Load params")
-        load_param_btn.setEnabled(True) #enable
-        load_param_btn.clicked.connect(self.load_params_from_file)
-        reset_param_btn = QPushButton("Reset params")
-        reset_param_btn.setEnabled(True) #enable
-        reset_param_btn.clicked.connect(self.reset_init_params)
-        others_layout_3.addWidget(save_param_btn)
-        others_layout_3.addWidget(load_param_btn)
-        others_layout_3.addWidget(reset_param_btn)
-        others_form.addRow(others_layout_3)
-        #left - row 9: more functions
-        others_layout_4 = QHBoxLayout()
-        clear_log_btn = QPushButton("Clear Log")
-        clear_log_btn.setEnabled(True) #enable
-        clear_log_btn.clicked.connect(self.clear_log)    
-        save_log_btn = QPushButton("Save Log")
-        save_log_btn.setEnabled(True) #enable 
-        save_log_btn.clicked.connect(self.save_log)
-        others_layout_4.addWidget(clear_log_btn)
-        others_layout_4.addWidget(save_log_btn)
-        others_form.addRow(others_layout_4)
-
-        others.setLayout(others_form)
-        try_form.addRow(others)
-        try_box.setLayout(try_form)
-
-        #right frame for Full
-        full_box = QGroupBox("Full Reconstruction")
-        full_form = QFormLayout()
-        #right - row 1 recon/recon_step
-        full_cuda_layout = QHBoxLayout()
-        full_cuda_layout.addWidget(QLabel("Recon method"))
-        self.recon_way_box_full = QComboBox()
-        self.recon_way_box_full.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.recon_way_box_full.addItems(["recon","recon_steps"])
-        self.recon_way_box_full.setCurrentIndex(0) # make recon as default
-        full_cuda_layout.addWidget(self.recon_way_box_full)
-        full_cuda_layout.addWidget(QLabel("cuda"))
-        self.cuda_box_full = QComboBox()
-        self.cuda_box_full.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.cuda_box_full.addItems(["0","1"])
-        self.cuda_box_full.setCurrentIndex(1) # make cuda 0 as default
-        full_cuda_layout.addWidget(self.cuda_box_full)
-        full_form.addRow(full_cuda_layout)
-        #right - row 2: COR (Full), add COR btn
-        cor_full_layout = QHBoxLayout()
-        cor_full_layout.addWidget(QLabel("COR (Full)"))
-        self.cor_input_full = QLineEdit()
-        cor_full_layout.addWidget(self.cor_input_full)
-        rec_cor_btn = QPushButton("Add COR")
-        rec_cor_btn.clicked.connect(self.record_cor_to_json)
-        cor_full_layout.addWidget(rec_cor_btn)
-        full_form.addRow(cor_full_layout)
-        #right - row 3: Full, View Full buttons
-        full_btn_layout = QHBoxLayout()
-        full_btn = QPushButton("Full")
-        full_btn.clicked.connect(self.full_reconstruction)
-        self.view_btn = QPushButton("View Full")
-        self.view_btn.setEnabled(True)
-        self.view_btn.clicked.connect(self.view_full_reconstruction)
-        full_btn_layout.addWidget(full_btn)
-        full_btn_layout.addWidget(self.view_btn)
-        full_form.addRow(full_btn_layout)
-        #right - row 4: Batch Full btn
-        batch_full_layout = QHBoxLayout()
-        batch_full_btn = QPushButton("Batch Full")
-        batch_full_btn.clicked.connect(self.batch_full_reconstruction)
-        self.refresh_json_btn = QPushButton("Refresh COR log")
-        self.refresh_json_btn.clicked.connect(self.refresh_cor_json)
-        batch_full_layout.addWidget(batch_full_btn)
-        batch_full_layout.addWidget(self.refresh_json_btn)
-        full_form.addRow(batch_full_layout)
-        #right - row 5: COR Log file
-        json_box_layout = QVBoxLayout()
-        json_box_layout.addWidget(QLabel("COR Log File:"))
-        self.cor_json_output = QTextEdit()
-        self.cor_json_output.setReadOnly(True)
-        self.cor_json_output.setStyleSheet("QTextEdit { font-size: 12pt; }")
-        json_box_layout.addWidget(self.cor_json_output)
-        self.load_cor_json_btn = QPushButton("Load/create COR file")
-        json_box_layout.addWidget(self.load_cor_json_btn)
-        self.load_cor_json_btn.clicked.connect(self.load_cor_to_jsonbox)
-        full_form.addRow(json_box_layout)
-
-        full_box.setLayout(full_form)
-        main_rows.addWidget(try_box,1)
-        main_rows.addWidget(full_box,1)
-        main_tab.addLayout(main_rows)
-        '''
         # Tab 2: Params (all CLI flags + extra args)
         self._build_params_tab()
         self._build_rings_tab()
@@ -548,10 +369,10 @@ class TomoGUI(QWidget):
         self._build_Performance_tab()
         self._build_advanced_config_tab()
         # Progress bar
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 0)
-        self.progress.setVisible(False)
-        left_layout.addWidget(self.progress)
+        # self.progress = QProgressBar()
+        # self.progress.setRange(0, 0)
+        # self.progress.setVisible(False)
+        # left_layout.addWidget(self.progress)
 
         # Log + COR JSON
         #log_json_layout = QHBoxLayout()
@@ -1832,149 +1653,149 @@ class TomoGUI(QWidget):
         config_txt_main.addWidget(right_full_box,1)
         config_main.addLayout(config_txt_main)
 
-        # ==== BATCH PROCESSING TAB ====
-        batch_tab = QWidget()
-        self.tabs.addTab(batch_tab, "Batch Processing")
-        self._build_batch_tab(batch_tab)
+    #     # ==== BATCH PROCESSING TAB ====
+    #     batch_tab = QWidget()
+    #     self.tabs.addTab(batch_tab, "Batch Processing")
+    #     self._build_batch_tab(batch_tab)
 
-    def _build_batch_tab(self, batch_tab):
-        """Build the batch processing tab for managing multiple datasets"""
-        main_layout = QVBoxLayout(batch_tab)
+    # def _build_batch_tab(self, batch_tab):
+    #     """Build the batch processing tab for managing multiple datasets"""
+    #     main_layout = QVBoxLayout(batch_tab)
 
-        # Top controls
-        controls_layout = QHBoxLayout()
+    #     # Top controls
+    #     controls_layout = QHBoxLayout()
 
-        refresh_list_btn = QPushButton("Refresh File List")
-        refresh_list_btn.clicked.connect(self._refresh_batch_file_list)
-        controls_layout.addWidget(refresh_list_btn)
+    #     refresh_list_btn = QPushButton("Refresh File List")
+    #     refresh_list_btn.clicked.connect(self._refresh_batch_file_list)
+    #     controls_layout.addWidget(refresh_list_btn)
 
-        save_cor_btn = QPushButton("Save COR to CSV")
-        save_cor_btn.clicked.connect(self._batch_save_cor_csv)
-        save_cor_btn.setToolTip("Save COR values to batch_cor_values.csv in data folder")
-        controls_layout.addWidget(save_cor_btn)
+    #     save_cor_btn = QPushButton("Save COR to CSV")
+    #     save_cor_btn.clicked.connect(self._batch_save_cor_csv)
+    #     save_cor_btn.setToolTip("Save COR values to batch_cor_values.csv in data folder")
+    #     controls_layout.addWidget(save_cor_btn)
 
-        load_cor_btn = QPushButton("Load COR from CSV")
-        load_cor_btn.clicked.connect(self._batch_load_cor_csv)
-        load_cor_btn.setToolTip("Load COR values from batch_cor_values.csv in data folder")
-        controls_layout.addWidget(load_cor_btn)
+    #     load_cor_btn = QPushButton("Load COR from CSV")
+    #     load_cor_btn.clicked.connect(self._batch_load_cor_csv)
+    #     load_cor_btn.setToolTip("Load COR values from batch_cor_values.csv in data folder")
+    #     controls_layout.addWidget(load_cor_btn)
 
-        controls_layout.addStretch()
+    #     controls_layout.addStretch()
 
-        select_all_btn = QPushButton("Select All")
-        select_all_btn.clicked.connect(self._batch_select_all)
-        controls_layout.addWidget(select_all_btn)
+    #     select_all_btn = QPushButton("Select All")
+    #     select_all_btn.clicked.connect(self._batch_select_all)
+    #     controls_layout.addWidget(select_all_btn)
 
-        deselect_all_btn = QPushButton("Deselect All")
-        deselect_all_btn.clicked.connect(self._batch_deselect_all)
-        controls_layout.addWidget(deselect_all_btn)
+    #     deselect_all_btn = QPushButton("Deselect All")
+    #     deselect_all_btn.clicked.connect(self._batch_deselect_all)
+    #     controls_layout.addWidget(deselect_all_btn)
 
-        main_layout.addLayout(controls_layout)
+    #     main_layout.addLayout(controls_layout)
 
-        # File list table
-        self.batch_file_table = QTableWidget()
-        self.batch_file_table.setColumnCount(9)
-        self.batch_file_table.setHorizontalHeaderLabels([
-            "Select", "Filename", "Size", "COR", "Status", "View Data", "View Try", "View Full", "Actions"
-        ])
+    #     # File list table
+    #     self.batch_file_table = QTableWidget()
+    #     self.batch_file_table.setColumnCount(9)
+    #     self.batch_file_table.setHorizontalHeaderLabels([
+    #         "Select", "Filename", "Size", "COR", "Status", "View Data", "View Try", "View Full", "Actions"
+    #     ])
 
-        # Configure table
-        self.batch_file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.batch_file_table.setSortingEnabled(True)  # Enable column sorting
-        header = self.batch_file_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Select checkbox
-        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Filename - user can resize
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Size
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # COR
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Status
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # View Data
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # View Try
-        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # View Full
-        header.setSectionResizeMode(8, QHeaderView.ResizeToContents)  # Actions
-        header.setSectionsClickable(True)  # Make headers clickable for sorting
+    #     # Configure table
+    #     self.batch_file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+    #     self.batch_file_table.setSortingEnabled(True)  # Enable column sorting
+    #     header = self.batch_file_table.horizontalHeader()
+    #     header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Select checkbox
+    #     header.setSectionResizeMode(1, QHeaderView.Interactive)  # Filename - user can resize
+    #     header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Size
+    #     header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # COR
+    #     header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Status
+    #     header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # View Data
+    #     header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # View Try
+    #     header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # View Full
+    #     header.setSectionResizeMode(8, QHeaderView.ResizeToContents)  # Actions
+    #     header.setSectionsClickable(True)  # Make headers clickable for sorting
 
-        # Set initial width for filename column to be wider (can be resized by user)
-        self.batch_file_table.setColumnWidth(1, 400)
+    #     # Set initial width for filename column to be wider (can be resized by user)
+    #     self.batch_file_table.setColumnWidth(1, 400)
 
-        main_layout.addWidget(self.batch_file_table)
+    #     main_layout.addWidget(self.batch_file_table)
 
-        # Machine and GPU configuration
-        machine_layout = QHBoxLayout()
-        machine_layout.addWidget(QLabel("Target Machine:"))
+    #     # Machine and GPU configuration
+    #     machine_layout = QHBoxLayout()
+    #     machine_layout.addWidget(QLabel("Target Machine:"))
 
-        self.batch_machine_box = QComboBox()
-        self.batch_machine_box.addItems(["Local", "tomo1", "tomo2", "tomo3", "tomo4", "tomo5"])
-        self.batch_machine_box.setCurrentText("Local")
-        self.batch_machine_box.setToolTip("Select machine to run batch reconstructions")
-        machine_layout.addWidget(self.batch_machine_box)
+    #     self.batch_machine_box = QComboBox()
+    #     self.batch_machine_box.addItems(["Local", "tomo1", "tomo2", "tomo3", "tomo4", "tomo5"])
+    #     self.batch_machine_box.setCurrentText("Local")
+    #     self.batch_machine_box.setToolTip("Select machine to run batch reconstructions")
+    #     machine_layout.addWidget(self.batch_machine_box)
 
-        machine_layout.addSpacing(20)
-        machine_layout.addWidget(QLabel("GPUs per machine:"))
+    #     machine_layout.addSpacing(20)
+    #     machine_layout.addWidget(QLabel("GPUs per machine:"))
 
-        self.batch_gpus_per_machine = QSpinBox()
-        self.batch_gpus_per_machine.setMinimum(1)
-        self.batch_gpus_per_machine.setMaximum(8)
-        self.batch_gpus_per_machine.setValue(1)
-        self.batch_gpus_per_machine.setToolTip("Number of GPUs available on the target machine (1 job per GPU)")
-        machine_layout.addWidget(self.batch_gpus_per_machine)
+    #     self.batch_gpus_per_machine_batch = QSpinBox()
+    #     self.batch_gpus_per_machine_batch.setMinimum(1)
+    #     self.batch_gpus_per_machine_batch.setMaximum(8)
+    #     self.batch_gpus_per_machine_batch.setValue(1)
+    #     self.batch_gpus_per_machine_batch.setToolTip("Number of GPUs available on the target machine (1 job per GPU)")
+    #     machine_layout.addWidget(self.batch_gpus_per_machine_batch)
 
-        machine_layout.addSpacing(20)
-        self.batch_queue_label = QLabel("Queue: 0 jobs waiting")
-        machine_layout.addWidget(self.batch_queue_label)
+    #     machine_layout.addSpacing(20)
+    #     self.batch_queue_label = QLabel("Queue: 0 jobs waiting")
+    #     machine_layout.addWidget(self.batch_queue_label)
 
-        machine_layout.addStretch()
-        main_layout.addLayout(machine_layout)
+    #     machine_layout.addStretch()
+    #     main_layout.addLayout(machine_layout)
 
-        # Batch operations
-        batch_ops_layout = QHBoxLayout()
+    #     # Batch operations
+    #     batch_ops_layout = QHBoxLayout()
 
-        batch_ops_layout.addWidget(QLabel("Batch Operations (on selected):"))
+    #     batch_ops_layout.addWidget(QLabel("Batch Operations (on selected):"))
 
-        batch_try_btn = QPushButton("Run Try on Selected")
-        batch_try_btn.clicked.connect(self._batch_run_try_selected)
-        batch_ops_layout.addWidget(batch_try_btn)
+    #     batch_try_btn = QPushButton("Run Try on Selected")
+    #     batch_try_btn.clicked.connect(self._batch_run_try_selected)
+    #     batch_ops_layout.addWidget(batch_try_btn)
 
-        batch_full_btn = QPushButton("Run Full on Selected")
-        batch_full_btn.clicked.connect(self._batch_run_full_selected)
-        batch_ops_layout.addWidget(batch_full_btn)
+    #     batch_full_btn = QPushButton("Run Full on Selected")
+    #     batch_full_btn.clicked.connect(self._batch_run_full_selected)
+    #     batch_ops_layout.addWidget(batch_full_btn)
 
-        self.batch_stop_btn = QPushButton("Stop Queue")
-        self.batch_stop_btn.clicked.connect(self._batch_stop_queue)
-        self.batch_stop_btn.setEnabled(False)
-        batch_ops_layout.addWidget(self.batch_stop_btn)
+    #     self.batch_stop_btn = QPushButton("Stop Queue")
+    #     self.batch_stop_btn.clicked.connect(self._batch_stop_queue)
+    #     self.batch_stop_btn.setEnabled(False)
+    #     batch_ops_layout.addWidget(self.batch_stop_btn)
 
-        batch_ops_layout.addStretch()
+    #     batch_ops_layout.addStretch()
 
-        remove_selected_btn = QPushButton("Remove Selected from List")
-        remove_selected_btn.clicked.connect(self._batch_remove_selected)
-        batch_ops_layout.addWidget(remove_selected_btn)
+    #     remove_selected_btn = QPushButton("Remove Selected from List")
+    #     remove_selected_btn.clicked.connect(self._batch_remove_selected)
+    #     batch_ops_layout.addWidget(remove_selected_btn)
 
-        main_layout.addLayout(batch_ops_layout)
+    #     main_layout.addLayout(batch_ops_layout)
 
-        # Progress section
-        progress_group = QGroupBox("Batch Progress")
-        progress_layout = QVBoxLayout()
+    #     # Progress section
+    #     progress_group = QGroupBox("Batch Progress")
+    #     progress_layout = QVBoxLayout()
 
-        self.batch_progress_bar = QProgressBar()
-        self.batch_progress_bar.setValue(0)
-        progress_layout.addWidget(self.batch_progress_bar)
+    #     self.batch_progress_bar = QProgressBar()
+    #     self.batch_progress_bar.setValue(0)
+    #     progress_layout.addWidget(self.batch_progress_bar)
 
-        self.batch_status_label = QLabel("Ready")
-        progress_layout.addWidget(self.batch_status_label)
+    #     self.batch_status_label = QLabel("Ready")
+    #     progress_layout.addWidget(self.batch_status_label)
 
-        progress_group.setLayout(progress_layout)
-        main_layout.addWidget(progress_group)
+    #     progress_group.setLayout(progress_layout)
+    #     main_layout.addWidget(progress_group)
 
-        # Initialize batch state
-        self.batch_file_list = []
-        self.batch_current_index = 0
-        self.batch_running = False
-        self.batch_job_queue = []  # Queue of pending jobs: [(file_info, recon_type, machine), ...]
-        self.batch_running_jobs = {}  # Dict of currently running jobs: {gpu_id: (process, file_info, recon_type)}
-        self.batch_available_gpus = []  # List of available GPU IDs
-        self.batch_total_jobs = 0  # Total number of jobs in current batch
-        self.batch_completed_jobs = 0  # Number of completed jobs
-        self.batch_current_machine = "Local"  # Current machine for batch
-        self.batch_current_num_gpus = 1  # Current number of GPUs
+    #     # Initialize batch state
+    #     self.batch_file_list = []
+    #     self.batch_current_index = 0
+    #     self.batch_running = False
+    #     self.batch_job_queue = []  # Queue of pending jobs: [(file_info, recon_type, machine), ...]
+    #     self.batch_running_jobs = {}  # Dict of currently running jobs: {gpu_id: (process, file_info, recon_type)}
+    #     self.batch_available_gpus = []  # List of available GPU IDs
+    #     self.batch_total_jobs = 0  # Total number of jobs in current batch
+    #     self.batch_completed_jobs = 0  # Number of completed jobs
+    #     self.batch_current_machine = "Local"  # Current machine for batch
+    #     self.batch_current_num_gpus = 1  # Current number of GPUs
 
 
     # ===== HELP METHODS =====
@@ -2324,55 +2145,6 @@ class TomoGUI(QWidget):
                         except Exception:
                             pass
         self.log_output.append(f'\u2705 Loaded params from {load_fn}')
-    def reset_init_params(self):
-        #parameters always included in recon
-        init_flags_values = {"--binning": "0", "--file-type": "standard", "--bright-ratio": "1.0",
-                               "--center-search-step": "0.5", "--center-search-width": "50.0",
-                               "--dezinger": "5", "--fbp-filter": "parzen",
-                               "--find-center-end-row": "-1", "--find-center-start-row": "0",
-                               "--flat-linear": "False", "--minus-log": "True",
-                               "--nsino": "0.5", "--rotation-axis-method": "sift", "--pre-processing": "True",
-                                "--reconstruction-algorithm": "fourierrec", #params in params_widgets
-                                "--remove-stripe-method": "none", #params in rings_widgets
-                                "--save-format": "tiff", "--logs-home": "/home/user/logs", "--verbose": "", #params in data_widgets
-                                "--clear-folder": "False", "--dtype": "float32", 
-                                "--start-column": "0", "--end-column": "-1", "--start-proj": "0", "--end-proj": "-1",
-                                "--start-row": "0", "--end-row": "-1", "--nproj-per-chunk": "8",
-                                "--nsino-per-chunk": "8", "--max-read-threads": "4", "--max-write-threads": "8"} #params in perf_widgets                      
-        for widgets in [self.param_widgets, self.phase_widgets, self.Geometry_widgets,
-                        self.bhard_widgets, self.rings_widgets, self.perf_widgets, self.data_widgets]:   
-            if widgets == self.Geometry_widgets or widgets == self.bhard_widgets or widgets == self.phase_widgets:
-                for flag, (kind, w, include_cb, _default) in widgets.items():
-                    if include_cb is not None and include_cb.isChecked():
-                        include_cb.setChecked(False)
-            else:
-                for flag, (kind, w, include_cb, _default) in widgets.items():
-                    if include_cb is not None and include_cb.isChecked():
-                        include_cb.setChecked(False)
-                    if flag in init_flags_values.keys():
-                        v = init_flags_values[flag]
-                        if kind == "line":
-                            w.setText(v)
-                        elif kind == "combo":
-                            if v in [w.itemText(i) for i in range(w.count())]:
-                                w.setCurrentText(v)
-                        elif kind == "check":
-                            w.setChecked(v.lower() in ("true","1","yes","checked"))
-                        elif kind == "spin":
-                            try:
-                                iv = int(v)
-                                if w.minimum() <= iv <= w.maximum():
-                                    w.setValue(iv)
-                            except Exception:
-                                pass
-                        elif kind == "dspin":
-                            try:
-                                fv = float(v)
-                                if w.minimum() <= fv <= w.maximum():
-                                    w.setValue(fv)
-                            except Exception:
-                                pass
-        self.log_output.append(f'\u2705 Reset parameters to initial values')
 
     def clear_log(self):
         self.log_output.clear()
@@ -3291,84 +3063,84 @@ class TomoGUI(QWidget):
                 self.log_output.append(f'<span style="color:red;">\u274c Tomolog {input_fn} failed</span>')
 
     # ===== BATCH PROCESSING METHODS =====
-    def _run_reconstruction_on_machine(self, file_path, recon_type='try'):
-        """
-        Run reconstruction on selected machine (local or remote)
+    # def _run_reconstruction_on_machine(self, file_path, recon_type='try'):
+    #     """
+    #     Run reconstruction on selected machine (local or remote)
 
-        Args:
-            file_path: Path to the .h5 file
-            recon_type: 'try' or 'full'
+    #     Args:
+    #         file_path: Path to the .h5 file
+    #         recon_type: 'try' or 'full'
 
-        Returns:
-            Exit code (0 for success)
-        """
-        machine = self.batch_machine_box.currentText()
+    #     Returns:
+    #         Exit code (0 for success)
+    #     """
+    #     machine = self.batch_machine_box.currentText()
 
-        # Get reconstruction parameters from Main tab
-        recon_way = self.recon_way_box.currentText()
+    #     # Get reconstruction parameters from Main tab
+    #     recon_way = self.recon_way_box.currentText()
 
-        # Get COR value EXCLUSIVELY from the batch table for this file
-        filename = os.path.basename(file_path)
-        cor_val = None
-        for file_info in self.batch_file_list:
-            if file_info['filename'] == filename:
-                cor_val = file_info['cor_input'].text().strip()
-                break
+    #     # Get COR value EXCLUSIVELY from the batch table for this file
+    #     filename = os.path.basename(file_path)
+    #     cor_val = None
+    #     for file_info in self.batch_file_list:
+    #         if file_info['filename'] == filename:
+    #             cor_val = file_info['cor_input'].text().strip()
+    #             break
 
-        # Batch tab ALWAYS uses manual COR with the value from the batch table
-        # Validate COR input - batch tab requires COR to be set in table
-        if not cor_val:
-            self.log_output.append(f'<span style="color:red;">❌ No COR value in batch table for {filename}</span>')
-            return -1
+    #     # Batch tab ALWAYS uses manual COR with the value from the batch table
+    #     # Validate COR input - batch tab requires COR to be set in table
+    #     if not cor_val:
+    #         self.log_output.append(f'<span style="color:red;">❌ No COR value in batch table for {filename}</span>')
+    #         return -1
 
-        try:
-            cor = float(cor_val)
-            self.log_output.append(f'📍 Using COR value from batch table: {cor_val} for {filename}')
-        except ValueError:
-            self.log_output.append(f'<span style="color:red;">❌ Invalid COR value "{cor_val}" for {filename}</span>')
-            return -1
+    #     try:
+    #         cor = float(cor_val)
+    #         self.log_output.append(f'📍 Using COR value from batch table: {cor_val} for {filename}')
+    #     except ValueError:
+    #         self.log_output.append(f'<span style="color:red;">❌ Invalid COR value "{cor_val}" for {filename}</span>')
+    #         return -1
 
-        gpu = self.cuda_box_try.currentText().strip() if recon_type == 'try' else self.cuda_box_full.currentText().strip()
+    #     gpu = self.cuda_box_try.currentText().strip() if recon_type == 'try' else self.cuda_box_full.currentText().strip()
 
-        # Build command
-        # Batch tab ALWAYS uses manual COR with the value from the batch table
-        if self.use_conf_box.isChecked():
-            config_editor = self.config_editor_try if recon_type == 'try' else self.config_editor_full
-            config_text = config_editor.toPlainText()
-            if not config_text.strip():
-                self.log_output.append(f'<span style="color:red;">⚠️ No config text</span>')
-                return -1
+    #     # Build command
+    #     # Batch tab ALWAYS uses manual COR with the value from the batch table
+    #     if self.use_conf_box.isChecked():
+    #         config_editor = self.config_editor_try if recon_type == 'try' else self.config_editor_full
+    #         config_text = config_editor.toPlainText()
+    #         if not config_text.strip():
+    #             self.log_output.append(f'<span style="color:red;">⚠️ No config text</span>')
+    #             return -1
 
-            temp_conf = os.path.join(self.data_path.text(), f"temp_{recon_type}.conf")
-            with open(temp_conf, "w") as f:
-                f.write(config_text)
+    #         temp_conf = os.path.join(self.data_path.text(), f"temp_{recon_type}.conf")
+    #         with open(temp_conf, "w") as f:
+    #             f.write(config_text)
 
-            cmd = ["tomocupy", str(recon_way),
-                   "--reconstruction-type", recon_type,
-                   "--config", temp_conf,
-                   "--file-name", file_path,
-                   "--rotation-axis-auto", "manual",
-                   "--rotation-axis", str(cor)]
-        else:
-            cmd = ["tomocupy", str(recon_way),
-                   "--reconstruction-type", recon_type,
-                   "--file-name", file_path,
-                   "--rotation-axis-auto", "manual",
-                   "--rotation-axis", str(cor)]
+    #         cmd = ["tomocupy", str(recon_way),
+    #                "--reconstruction-type", recon_type,
+    #                "--config", temp_conf,
+    #                "--file-name", file_path,
+    #                "--rotation-axis-auto", "manual",
+    #                "--rotation-axis", str(cor)]
+    #     else:
+    #         cmd = ["tomocupy", str(recon_way),
+    #                "--reconstruction-type", recon_type,
+    #                "--file-name", file_path,
+    #                "--rotation-axis-auto", "manual",
+    #                "--rotation-axis", str(cor)]
 
-        # Wrap command for remote execution if needed
-        cmd = self._get_batch_machine_command(cmd, machine)
+    #     # Wrap command for remote execution if needed
+    #     cmd = self._get_batch_machine_command(cmd, machine)
 
-        # Log the machine being used
-        if machine != "Local":
-            self.log_output.append(f'🖥️ Running on {machine}: {os.path.basename(file_path)}')
+    #     # Log the machine being used
+    #     if machine != "Local":
+    #         self.log_output.append(f'🖥️ Running on {machine}: {os.path.basename(file_path)}')
 
-        # Execute command
-        code = self.run_command_live(cmd, proj_file=file_path,
-                                     job_label=f"{recon_type}-{machine}",
-                                     wait=True, cuda_devices=gpu if machine == "Local" else None)
+    #     # Execute command
+    #     code = self.run_command_live(cmd, proj_file=file_path,
+    #                                  job_label=f"{recon_type}-{machine}",
+    #                                  wait=True, cuda_devices=gpu if machine == "Local" else None)
 
-        return code
+    #     return code
 
     def _format_file_size(self, size_bytes):
         """Format file size in human-readable format"""
@@ -3475,382 +3247,382 @@ class TomoGUI(QWidget):
             # Silently ignore errors (widget might be deleted)
             pass
 
-    def _refresh_batch_file_list(self):
-        """Refresh the file list in the batch processing tab"""
-        folder = self.data_path.text()
-        if not folder or not os.path.isdir(folder):
-            QMessageBox.warning(self, "Warning", "Please select a valid data folder first.")
-            return
+    # def _refresh_batch_file_list(self):
+    #     """Refresh the file list in the batch processing tab"""
+    #     folder = self.data_path.text()
+    #     if not folder or not os.path.isdir(folder):
+    #         QMessageBox.warning(self, "Warning", "Please select a valid data folder first.")
+    #         return
 
-        # Warn if queue is running
-        if self.batch_running:
-            reply = QMessageBox.question(
-                self, 'Queue Running',
-                f'A batch queue is currently running ({len(self.batch_running_jobs)} jobs active, {len(self.batch_job_queue)} queued).\n\n'
-                f'Refreshing will delete the table widgets but jobs will continue running in the background.\n\n'
-                f'Continue with refresh?',
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-            )
-            if reply == QMessageBox.No:
-                return
-            self.log_output.append(f'<span style="color:orange;">⚠️  Refreshed file list while queue was running - status updates may be lost</span>')
+    #     # Warn if queue is running
+    #     if self.batch_running:
+    #         reply = QMessageBox.question(
+    #             self, 'Queue Running',
+    #             f'A batch queue is currently running ({len(self.batch_running_jobs)} jobs active, {len(self.batch_job_queue)} queued).\n\n'
+    #             f'Refreshing will delete the table widgets but jobs will continue running in the background.\n\n'
+    #             f'Continue with refresh?',
+    #             QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+    #         )
+    #         if reply == QMessageBox.No:
+    #             return
+    #         self.log_output.append(f'<span style="color:orange;">⚠️  Refreshed file list while queue was running - status updates may be lost</span>')
 
-        # Get all .h5 files
-        h5_files = sorted(glob.glob(os.path.join(folder, "*.h5")), key=os.path.getmtime, reverse=True)
+    #     # Get all .h5 files
+    #     h5_files = sorted(glob.glob(os.path.join(folder, "*.h5")), key=os.path.getmtime, reverse=True)
 
-        # Save current COR values before clearing (to preserve user input)
-        cor_values = {}
-        for file_info in self.batch_file_list:
-            try:
-                filename = file_info['filename']
-                cor_val = file_info['cor_input'].text().strip()
-                if cor_val:
-                    cor_values[filename] = cor_val
-            except (KeyError, RuntimeError):
-                # Widget may have been deleted
-                pass
+    #     # Save current COR values before clearing (to preserve user input)
+    #     cor_values = {}
+    #     for file_info in self.batch_file_list:
+    #         try:
+    #             filename = file_info['filename']
+    #             cor_val = file_info['cor_input'].text().strip()
+    #             if cor_val:
+    #                 cor_values[filename] = cor_val
+    #         except (KeyError, RuntimeError):
+    #             # Widget may have been deleted
+    #             pass
 
-        # Clear existing table - disable sorting first to avoid issues
-        self.batch_file_table.setSortingEnabled(False)
-        self.batch_file_table.setRowCount(0)
-        self.batch_file_list = []
-        # Reset last clicked row to avoid stale row references
-        self.batch_last_clicked_row = None
+    #     # Clear existing table - disable sorting first to avoid issues
+    #     self.batch_file_table.setSortingEnabled(False)
+    #     self.batch_file_table.setRowCount(0)
+    #     self.batch_file_list = []
+    #     # Reset last clicked row to avoid stale row references
+    #     self.batch_last_clicked_row = None
 
-        # Populate table
-        data_folder = self.data_path.text().strip()
-        for file_path in h5_files:
-            filename = os.path.basename(file_path)
-            row = self.batch_file_table.rowCount()
-            self.batch_file_table.insertRow(row)
+    #     # Populate table
+    #     data_folder = self.data_path.text().strip()
+    #     for file_path in h5_files:
+    #         filename = os.path.basename(file_path)
+    #         row = self.batch_file_table.rowCount()
+    #         self.batch_file_table.insertRow(row)
 
-            # Check reconstruction status
-            proj_name = os.path.splitext(filename)[0]
-            try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
-            full_dir = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec")
+    #         # Check reconstruction status
+    #         proj_name = os.path.splitext(filename)[0]
+    #         try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
+    #         full_dir = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec")
 
-            has_try = os.path.isdir(try_dir) and len(glob.glob(os.path.join(try_dir, "*.tiff"))) > 0
-            has_full = os.path.isdir(full_dir) and len(glob.glob(os.path.join(full_dir, "*.tiff"))) > 0
+    #         has_try = os.path.isdir(try_dir) and len(glob.glob(os.path.join(try_dir, "*.tiff"))) > 0
+    #         has_full = os.path.isdir(full_dir) and len(glob.glob(os.path.join(full_dir, "*.tiff"))) > 0
 
-            # Determine row color based on reconstruction status
-            if has_full:
-                row_color = "green"  # Full reconstruction exists
-            elif has_try:
-                row_color = "orange"  # Only try reconstruction exists
-            else:
-                row_color = "red"  # No reconstruction
+    #         # Determine row color based on reconstruction status
+    #         if has_full:
+    #             row_color = "green"  # Full reconstruction exists
+    #         elif has_try:
+    #             row_color = "orange"  # Only try reconstruction exists
+    #         else:
+    #             row_color = "red"  # No reconstruction
 
-            # Store file info
-            file_info = {
-                'path': file_path,
-                'filename': filename,
-                'status': 'Ready',
-                'row': row,
-                'recon_status': row_color
-            }
-            self.batch_file_list.append(file_info)
+    #         # Store file info
+    #         file_info = {
+    #             'path': file_path,
+    #             'filename': filename,
+    #             'status': 'Ready',
+    #             'row': row,
+    #             'recon_status': row_color
+    #         }
+    #         self.batch_file_list.append(file_info)
 
-            # Checkbox for selection with shift-click support
-            checkbox = QCheckBox()
-            checkbox.clicked.connect(lambda checked, r=row: self._batch_checkbox_clicked(r, checked))
-            checkbox_widget = QWidget()
-            checkbox_layout = QHBoxLayout(checkbox_widget)
-            checkbox_layout.addWidget(checkbox)
-            checkbox_layout.setAlignment(Qt.AlignCenter)
-            checkbox_layout.setContentsMargins(0, 0, 0, 0)
-            self.batch_file_table.setCellWidget(row, 0, checkbox_widget)
-            file_info['checkbox'] = checkbox
+    #         # Checkbox for selection with shift-click support
+    #         checkbox = QCheckBox()
+    #         checkbox.clicked.connect(lambda checked, r=row: self._batch_checkbox_clicked(r, checked))
+    #         checkbox_widget = QWidget()
+    #         checkbox_layout = QHBoxLayout(checkbox_widget)
+    #         checkbox_layout.addWidget(checkbox)
+    #         checkbox_layout.setAlignment(Qt.AlignCenter)
+    #         checkbox_layout.setContentsMargins(0, 0, 0, 0)
+    #         self.batch_file_table.setCellWidget(row, 0, checkbox_widget)
+    #         file_info['checkbox'] = checkbox
 
-            # Filename - show full name and set tooltip with full path
-            filename_item = QTableWidgetItem(filename)
-            filename_item.setToolTip(f"{filename}\n\nFull path:\n{file_path}")
-            self.batch_file_table.setItem(row, 1, filename_item)
+    #         # Filename - show full name and set tooltip with full path
+    #         filename_item = QTableWidgetItem(filename)
+    #         filename_item.setToolTip(f"{filename}\n\nFull path:\n{file_path}")
+    #         self.batch_file_table.setItem(row, 1, filename_item)
 
-            # File size
-            try:
-                file_size = os.path.getsize(file_path)
-                size_str = self._format_file_size(file_size)
-                size_item = QTableWidgetItem(size_str)
-                size_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                # Store numeric value for proper sorting
-                size_item.setData(Qt.UserRole, file_size)
-                self.batch_file_table.setItem(row, 2, size_item)
-            except Exception as e:
-                self.batch_file_table.setItem(row, 2, QTableWidgetItem("N/A"))
+    #         # File size
+    #         try:
+    #             file_size = os.path.getsize(file_path)
+    #             size_str = self._format_file_size(file_size)
+    #             size_item = QTableWidgetItem(size_str)
+    #             size_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    #             # Store numeric value for proper sorting
+    #             size_item.setData(Qt.UserRole, file_size)
+    #             self.batch_file_table.setItem(row, 2, size_item)
+    #         except Exception as e:
+    #             self.batch_file_table.setItem(row, 2, QTableWidgetItem("N/A"))
 
-            # COR value (editable)
-            cor_input = QLineEdit()
-            cor_input.setPlaceholderText("COR value")
-            cor_input.setAlignment(Qt.AlignCenter)
-            cor_input.setFixedWidth(80)
-            # Restore previous COR value if it exists
-            if filename in cor_values:
-                cor_input.setText(cor_values[filename])
-            self.batch_file_table.setCellWidget(row, 3, cor_input)
-            file_info['cor_input'] = cor_input
+    #         # COR value (editable)
+    #         cor_input = QLineEdit()
+    #         cor_input.setPlaceholderText("COR value")
+    #         cor_input.setAlignment(Qt.AlignCenter)
+    #         cor_input.setFixedWidth(80)
+    #         # Restore previous COR value if it exists
+    #         if filename in cor_values:
+    #             cor_input.setText(cor_values[filename])
+    #         self.batch_file_table.setCellWidget(row, 3, cor_input)
+    #         file_info['cor_input'] = cor_input
 
-            # Status
-            status_item = QTableWidgetItem('Ready')
-            self.batch_file_table.setItem(row, 4, status_item)
-            file_info['status_item'] = status_item
+    #         # Status
+    #         status_item = QTableWidgetItem('Ready')
+    #         self.batch_file_table.setItem(row, 4, status_item)
+    #         file_info['status_item'] = status_item
 
-            # View Data button (original HDF5 data)
-            view_data_btn = QPushButton("View Data")
-            view_data_btn.clicked.connect(lambda checked, fp=file_path: self._batch_view_data(fp))
-            self.batch_file_table.setCellWidget(row, 5, view_data_btn)
+    #         # View Data button (original HDF5 data)
+    #         view_data_btn = QPushButton("View Data")
+    #         view_data_btn.clicked.connect(lambda checked, fp=file_path: self._batch_view_data(fp))
+    #         self.batch_file_table.setCellWidget(row, 5, view_data_btn)
 
-            # View Try button
-            view_try_btn = QPushButton("View Try")
-            view_try_btn.clicked.connect(lambda checked, fp=file_path: self._batch_view_try(fp))
-            self.batch_file_table.setCellWidget(row, 6, view_try_btn)
+    #         # View Try button
+    #         view_try_btn = QPushButton("View Try")
+    #         view_try_btn.clicked.connect(lambda checked, fp=file_path: self._batch_view_try(fp))
+    #         self.batch_file_table.setCellWidget(row, 6, view_try_btn)
 
-            # View Full button
-            view_full_btn = QPushButton("View Full")
-            view_full_btn.clicked.connect(lambda checked, fp=file_path: self._batch_view_full(fp))
-            self.batch_file_table.setCellWidget(row, 7, view_full_btn)
+    #         # View Full button
+    #         view_full_btn = QPushButton("View Full")
+    #         view_full_btn.clicked.connect(lambda checked, fp=file_path: self._batch_view_full(fp))
+    #         self.batch_file_table.setCellWidget(row, 7, view_full_btn)
 
-            # Actions button
-            actions_widget = QWidget()
-            actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setContentsMargins(2, 2, 2, 2)
-            actions_layout.setSpacing(2)
+    #         # Actions button
+    #         actions_widget = QWidget()
+    #         actions_layout = QHBoxLayout(actions_widget)
+    #         actions_layout.setContentsMargins(2, 2, 2, 2)
+    #         actions_layout.setSpacing(2)
 
-            try_btn = QPushButton("Try")
-            try_btn.setFixedWidth(50)
-            try_btn.clicked.connect(lambda checked, fp=file_path: self._batch_run_try_single(fp))
-            actions_layout.addWidget(try_btn)
+    #         try_btn = QPushButton("Try")
+    #         try_btn.setFixedWidth(50)
+    #         try_btn.clicked.connect(lambda checked, fp=file_path: self._batch_run_try_single(fp))
+    #         actions_layout.addWidget(try_btn)
 
-            full_btn = QPushButton("Full")
-            full_btn.setFixedWidth(50)
-            full_btn.clicked.connect(lambda checked, fp=file_path: self._batch_run_full_single(fp))
-            actions_layout.addWidget(full_btn)
+    #         full_btn = QPushButton("Full")
+    #         full_btn.setFixedWidth(50)
+    #         full_btn.clicked.connect(lambda checked, fp=file_path: self._batch_run_full_single(fp))
+    #         actions_layout.addWidget(full_btn)
 
-            self.batch_file_table.setCellWidget(row, 8, actions_widget)
+    #         self.batch_file_table.setCellWidget(row, 8, actions_widget)
 
-            # Apply colored left border indicator based on reconstruction status
-            # Create a colored indicator in the checkbox column
-            checkbox_widget.setStyleSheet(f"QWidget {{ border-left: 6px solid {row_color}; }}")
+    #         # Apply colored left border indicator based on reconstruction status
+    #         # Create a colored indicator in the checkbox column
+    #         checkbox_widget.setStyleSheet(f"QWidget {{ border-left: 6px solid {row_color}; }}")
 
-        # Re-enable sorting after populating the table
-        self.batch_file_table.setSortingEnabled(True)
+    #     # Re-enable sorting after populating the table
+    #     self.batch_file_table.setSortingEnabled(True)
 
-        self.batch_status_label.setText(f"Loaded {len(h5_files)} files")
+    #     self.batch_status_label.setText(f"Loaded {len(h5_files)} files")
 
-        # Try to auto-load COR values from CSV if no values were preserved from previous refresh
-        # Only auto-load if we don't already have COR values
-        if not cor_values:
-            self._batch_load_cor_csv(silent=True)
-        else:
-            # Count how many COR values were restored
-            restored_count = len(cor_values)
-            self.batch_status_label.setText(f"Loaded {len(h5_files)} files ({restored_count} with COR values)")
+    #     # Try to auto-load COR values from CSV if no values were preserved from previous refresh
+    #     # Only auto-load if we don't already have COR values
+    #     if not cor_values:
+    #         self._batch_load_cor_csv(silent=True)
+    #     else:
+    #         # Count how many COR values were restored
+    #         restored_count = len(cor_values)
+    #         self.batch_status_label.setText(f"Loaded {len(h5_files)} files ({restored_count} with COR values)")
 
-    def _batch_save_cor_csv(self):
-        """Save COR values to CSV file in the data directory"""
-        folder = self.data_path.text()
-        if not folder or not os.path.isdir(folder):
-            QMessageBox.warning(self, "Warning", "Please select a valid data folder first.")
-            return
+    # def _batch_save_cor_csv(self):
+    #     """Save COR values to CSV file in the data directory"""
+    #     folder = self.data_path.text()
+    #     if not folder or not os.path.isdir(folder):
+    #         QMessageBox.warning(self, "Warning", "Please select a valid data folder first.")
+    #         return
 
-        if not self.batch_file_list:
-            QMessageBox.warning(self, "Warning", "No files in the batch list.")
-            return
+    #     if not self.batch_file_list:
+    #         QMessageBox.warning(self, "Warning", "No files in the batch list.")
+    #         return
 
-        csv_path = os.path.join(folder, "batch_cor_values.csv")
+    #     csv_path = os.path.join(folder, "batch_cor_values.csv")
 
-        try:
-            import csv
-            saved_count = 0
-            skipped_count = 0
+    #     try:
+    #         import csv
+    #         saved_count = 0
+    #         skipped_count = 0
 
-            with open(csv_path, 'w', newline='') as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerow(['Filename', 'COR'])
+    #         with open(csv_path, 'w', newline='') as csvfile:
+    #             writer = csv.writer(csvfile)
+    #             writer.writerow(['Filename', 'COR'])
 
-                for file_info in self.batch_file_list:
-                    try:
-                        filename = file_info['filename']
-                        cor_value = file_info['cor_input'].text().strip()
-                        writer.writerow([filename, cor_value])
-                        saved_count += 1
-                    except (RuntimeError, KeyError):
-                        # Widget was deleted (e.g., file was removed)
-                        skipped_count += 1
-                        continue
+    #             for file_info in self.batch_file_list:
+    #                 try:
+    #                     filename = file_info['filename']
+    #                     cor_value = file_info['cor_input'].text().strip()
+    #                     writer.writerow([filename, cor_value])
+    #                     saved_count += 1
+    #                 except (RuntimeError, KeyError):
+    #                     # Widget was deleted (e.g., file was removed)
+    #                     skipped_count += 1
+    #                     continue
 
-            if skipped_count > 0:
-                self.log_output.append(f'<span style="color:orange;">⚠️  Saved {saved_count} COR values to {csv_path} ({skipped_count} skipped - widgets deleted)</span>')
-                self.batch_status_label.setText(f"COR values saved ({skipped_count} files skipped)")
-                QMessageBox.information(self, "Success", f"COR values saved to:\n{csv_path}\n\n{saved_count} saved, {skipped_count} skipped (deleted files)")
-            else:
-                self.log_output.append(f'<span style="color:green;">✅ Saved {saved_count} COR values to {csv_path}</span>')
-                self.batch_status_label.setText(f"COR values saved to batch_cor_values.csv")
-                QMessageBox.information(self, "Success", f"COR values saved to:\n{csv_path}")
+    #         if skipped_count > 0:
+    #             self.log_output.append(f'<span style="color:orange;">⚠️  Saved {saved_count} COR values to {csv_path} ({skipped_count} skipped - widgets deleted)</span>')
+    #             self.batch_status_label.setText(f"COR values saved ({skipped_count} files skipped)")
+    #             QMessageBox.information(self, "Success", f"COR values saved to:\n{csv_path}\n\n{saved_count} saved, {skipped_count} skipped (deleted files)")
+    #         else:
+    #             self.log_output.append(f'<span style="color:green;">✅ Saved {saved_count} COR values to {csv_path}</span>')
+    #             self.batch_status_label.setText(f"COR values saved to batch_cor_values.csv")
+    #             QMessageBox.information(self, "Success", f"COR values saved to:\n{csv_path}")
 
-        except Exception as e:
-            self.log_output.append(f'<span style="color:red;">❌ Failed to save COR CSV: {e}</span>')
-            QMessageBox.critical(self, "Error", f"Failed to save COR values:\n{e}")
+    #     except Exception as e:
+    #         self.log_output.append(f'<span style="color:red;">❌ Failed to save COR CSV: {e}</span>')
+    #         QMessageBox.critical(self, "Error", f"Failed to save COR values:\n{e}")
 
-    def _batch_load_cor_csv(self, silent=False):
-        """Load COR values from CSV file in the data directory"""
-        folder = self.data_path.text()
-        if not folder or not os.path.isdir(folder):
-            if not silent:
-                QMessageBox.warning(self, "Warning", "Please select a valid data folder first.")
-            return
+    # def _batch_load_cor_csv(self, silent=False):
+    #     """Load COR values from CSV file in the data directory"""
+    #     folder = self.data_path.text()
+    #     if not folder or not os.path.isdir(folder):
+    #         if not silent:
+    #             QMessageBox.warning(self, "Warning", "Please select a valid data folder first.")
+    #         return
 
-        if not self.batch_file_list:
-            if not silent:
-                QMessageBox.warning(self, "Warning", "No files in the batch list. Refresh the file list first.")
-            return
+    #     if not self.batch_file_list:
+    #         if not silent:
+    #             QMessageBox.warning(self, "Warning", "No files in the batch list. Refresh the file list first.")
+    #         return
 
-        csv_path = os.path.join(folder, "batch_cor_values.csv")
+    #     csv_path = os.path.join(folder, "batch_cor_values.csv")
 
-        if not os.path.exists(csv_path):
-            if not silent:
-                QMessageBox.warning(self, "Warning", f"COR CSV file not found:\n{csv_path}")
-            return
+    #     if not os.path.exists(csv_path):
+    #         if not silent:
+    #             QMessageBox.warning(self, "Warning", f"COR CSV file not found:\n{csv_path}")
+    #         return
 
-        try:
-            import csv
-            cor_dict = {}
-            with open(csv_path, 'r') as csvfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
-                    filename = row.get('Filename', '').strip()
-                    cor_value = row.get('COR', '').strip()
-                    if filename:
-                        cor_dict[filename] = cor_value
+    #     try:
+    #         import csv
+    #         cor_dict = {}
+    #         with open(csv_path, 'r') as csvfile:
+    #             reader = csv.DictReader(csvfile)
+    #             for row in reader:
+    #                 filename = row.get('Filename', '').strip()
+    #                 cor_value = row.get('COR', '').strip()
+    #                 if filename:
+    #                     cor_dict[filename] = cor_value
 
-            # Apply COR values to the table
-            loaded_count = 0
-            skipped_count = 0
-            for file_info in self.batch_file_list:
-                try:
-                    filename = file_info['filename']
-                    if filename in cor_dict:
-                        file_info['cor_input'].setText(cor_dict[filename])
-                        loaded_count += 1
-                except (RuntimeError, KeyError):
-                    # Widget was deleted (e.g., file was removed)
-                    skipped_count += 1
-                    continue
+    #         # Apply COR values to the table
+    #         loaded_count = 0
+    #         skipped_count = 0
+    #         for file_info in self.batch_file_list:
+    #             try:
+    #                 filename = file_info['filename']
+    #                 if filename in cor_dict:
+    #                     file_info['cor_input'].setText(cor_dict[filename])
+    #                     loaded_count += 1
+    #             except (RuntimeError, KeyError):
+    #                 # Widget was deleted (e.g., file was removed)
+    #                 skipped_count += 1
+    #                 continue
 
-            if not silent:
-                if skipped_count > 0:
-                    self.log_output.append(f'<span style="color:orange;">⚠️  Loaded {loaded_count} COR values from {csv_path} ({skipped_count} skipped - widgets deleted)</span>')
-                    self.batch_status_label.setText(f"Loaded {loaded_count} COR values ({skipped_count} skipped)")
-                    QMessageBox.information(self, "Success", f"Loaded {loaded_count} COR values from:\n{csv_path}\n\n{skipped_count} files skipped (deleted widgets)")
-                else:
-                    self.log_output.append(f'<span style="color:green;">✅ Loaded COR values from {csv_path}</span>')
-                    self.batch_status_label.setText(f"Loaded {loaded_count} COR values from CSV")
-                    QMessageBox.information(self, "Success", f"Loaded {loaded_count} COR values from:\n{csv_path}")
-            else:
-                self.batch_status_label.setText(f"Loaded {len(self.batch_file_list)} files ({loaded_count} with COR values)")
+    #         if not silent:
+    #             if skipped_count > 0:
+    #                 self.log_output.append(f'<span style="color:orange;">⚠️  Loaded {loaded_count} COR values from {csv_path} ({skipped_count} skipped - widgets deleted)</span>')
+    #                 self.batch_status_label.setText(f"Loaded {loaded_count} COR values ({skipped_count} skipped)")
+    #                 QMessageBox.information(self, "Success", f"Loaded {loaded_count} COR values from:\n{csv_path}\n\n{skipped_count} files skipped (deleted widgets)")
+    #             else:
+    #                 self.log_output.append(f'<span style="color:green;">✅ Loaded COR values from {csv_path}</span>')
+    #                 self.batch_status_label.setText(f"Loaded {loaded_count} COR values from CSV")
+    #                 QMessageBox.information(self, "Success", f"Loaded {loaded_count} COR values from:\n{csv_path}")
+    #         else:
+    #             self.batch_status_label.setText(f"Loaded {len(self.batch_file_list)} files ({loaded_count} with COR values)")
 
-        except Exception as e:
-            if not silent:
-                self.log_output.append(f'<span style="color:red;">❌ Failed to load COR CSV: {e}</span>')
-                QMessageBox.critical(self, "Error", f"Failed to load COR values:\n{e}")
+    #     except Exception as e:
+    #         if not silent:
+    #             self.log_output.append(f'<span style="color:red;">❌ Failed to load COR CSV: {e}</span>')
+    #             QMessageBox.critical(self, "Error", f"Failed to load COR values:\n{e}")
 
 
-    def _batch_remove_selected(self):
-        """Physically delete selected files from the filesystem"""
-        files_to_remove = [f for f in self.batch_file_list if f['checkbox'].isChecked()]
+    # def _batch_remove_selected(self):
+    #     """Physically delete selected files from the filesystem"""
+    #     files_to_remove = [f for f in self.batch_file_list if f['checkbox'].isChecked()]
 
-        if not files_to_remove:
-            QMessageBox.warning(self, "Warning", "No files selected.")
-            return
+    #     if not files_to_remove:
+    #         QMessageBox.warning(self, "Warning", "No files selected.")
+    #         return
 
-        # Confirm deletion
-        reply = QMessageBox.question(
-            self, 'Confirm File Deletion',
-            f'Are you sure you want to PERMANENTLY DELETE {len(files_to_remove)} file(s) from disk?\n\nThis action cannot be undone!',
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
+    #     # Confirm deletion
+    #     reply = QMessageBox.question(
+    #         self, 'Confirm File Deletion',
+    #         f'Are you sure you want to PERMANENTLY DELETE {len(files_to_remove)} file(s) from disk?\n\nThis action cannot be undone!',
+    #         QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+    #     )
 
-        if reply == QMessageBox.No:
-            return
+    #     if reply == QMessageBox.No:
+    #         return
 
-        # Delete files from disk
-        deleted_count = 0
-        failed_files = []
-        rows_to_remove = []
+    #     # Delete files from disk
+    #     deleted_count = 0
+    #     failed_files = []
+    #     rows_to_remove = []
 
-        for file_info in files_to_remove:
-            try:
-                os.remove(file_info['path'])
-                rows_to_remove.append(file_info['row'])
-                deleted_count += 1
-                self.log_output.append(f'<span style="color:green;">✅ Deleted: {file_info["filename"]}</span>')
-            except Exception as e:
-                failed_files.append(file_info['filename'])
-                self.log_output.append(f'<span style="color:red;">❌ Failed to delete {file_info["filename"]}: {e}</span>')
+    #     for file_info in files_to_remove:
+    #         try:
+    #             os.remove(file_info['path'])
+    #             rows_to_remove.append(file_info['row'])
+    #             deleted_count += 1
+    #             self.log_output.append(f'<span style="color:green;">✅ Deleted: {file_info["filename"]}</span>')
+    #         except Exception as e:
+    #             failed_files.append(file_info['filename'])
+    #             self.log_output.append(f'<span style="color:red;">❌ Failed to delete {file_info["filename"]}: {e}</span>')
 
-        # Remove rows from table
-        for row in sorted(rows_to_remove, reverse=True):
-            self.batch_file_table.removeRow(row)
+    #     # Remove rows from table
+    #     for row in sorted(rows_to_remove, reverse=True):
+    #         self.batch_file_table.removeRow(row)
 
-        # Update file list and row indices
-        self.batch_file_list = [f for f in self.batch_file_list if f['row'] not in rows_to_remove]
-        for i, file_info in enumerate(self.batch_file_list):
-            file_info['row'] = i
+    #     # Update file list and row indices
+    #     self.batch_file_list = [f for f in self.batch_file_list if f['row'] not in rows_to_remove]
+    #     for i, file_info in enumerate(self.batch_file_list):
+    #         file_info['row'] = i
 
-        # Update status
-        if failed_files:
-            self.batch_status_label.setText(f"Deleted {deleted_count} files, {len(failed_files)} failed")
-        else:
-            self.batch_status_label.setText(f"Successfully deleted {deleted_count} files")
+    #     # Update status
+    #     if failed_files:
+    #         self.batch_status_label.setText(f"Deleted {deleted_count} files, {len(failed_files)} failed")
+    #     else:
+    #         self.batch_status_label.setText(f"Successfully deleted {deleted_count} files")
 
-        # Refresh the main file dropdown
-        self.refresh_h5_files()
+    #     # Refresh the main file dropdown
+    #     self.refresh_h5_files()
 
-    def _batch_view_data(self, file_path):
-        """Open HDF5 viewer to view original data"""
-        if not os.path.exists(file_path):
-            QMessageBox.warning(self, "File Not Found", f"File does not exist:\n{file_path}")
-            return
+    # def _batch_view_data(self, file_path):
+    #     """Open HDF5 viewer to view original data"""
+    #     if not os.path.exists(file_path):
+    #         QMessageBox.warning(self, "File Not Found", f"File does not exist:\n{file_path}")
+    #         return
 
-        try:
-            # Create and show the HDF5 viewer dialog
-            viewer = HDF5ImageDividerDialog(file_path=file_path, parent=self)
-            viewer.show()
-            self.log_output.append(f'<span style="color:green;">✅ Opened HDF5 viewer for: {os.path.basename(file_path)}</span>')
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to open HDF5 viewer:\n{str(e)}")
-            self.log_output.append(f'<span style="color:red;">❌ Failed to open HDF5 viewer: {str(e)}</span>')
+    #     try:
+    #         # Create and show the HDF5 viewer dialog
+    #         viewer = HDF5ImageDividerDialog(file_path=file_path, parent=self)
+    #         viewer.show()
+    #         self.log_output.append(f'<span style="color:green;">✅ Opened HDF5 viewer for: {os.path.basename(file_path)}</span>')
+    #     except Exception as e:
+    #         QMessageBox.critical(self, "Error", f"Failed to open HDF5 viewer:\n{str(e)}")
+    #         self.log_output.append(f'<span style="color:red;">❌ Failed to open HDF5 viewer: {str(e)}</span>')
 
-    def _batch_view_try(self, file_path):
-        """View try reconstruction for a specific file"""
-        # Set the file in the main dropdown
-        index = self.proj_file_box.findData(file_path)
-        if index >= 0:
-            self.proj_file_box.setCurrentIndex(index)
-        else:
-            # File not in dropdown, refresh and try again
-            self.refresh_h5_files()
-            index = self.proj_file_box.findData(file_path)
-            if index >= 0:
-                self.proj_file_box.setCurrentIndex(index)
+    # def _batch_view_try(self, file_path):
+    #     """View try reconstruction for a specific file"""
+    #     # Set the file in the main dropdown
+    #     index = self.proj_file_box.findData(file_path)
+    #     if index >= 0:
+    #         self.proj_file_box.setCurrentIndex(index)
+    #     else:
+    #         # File not in dropdown, refresh and try again
+    #         self.refresh_h5_files()
+    #         index = self.proj_file_box.findData(file_path)
+    #         if index >= 0:
+    #             self.proj_file_box.setCurrentIndex(index)
 
-        # Call the existing view try method
-        self.view_try_reconstruction()
+    #     # Call the existing view try method
+    #     self.view_try_reconstruction()
 
-    def _batch_view_full(self, file_path):
-        """View full reconstruction for a specific file"""
-        # Set the file in the main dropdown
-        index = self.proj_file_box.findData(file_path)
-        if index >= 0:
-            self.proj_file_box.setCurrentIndex(index)
-        else:
-            # File not in dropdown, refresh and try again
-            self.refresh_h5_files()
-            index = self.proj_file_box.findData(file_path)
-            if index >= 0:
-                self.proj_file_box.setCurrentIndex(index)
+    # def _batch_view_full(self, file_path):
+    #     """View full reconstruction for a specific file"""
+    #     # Set the file in the main dropdown
+    #     index = self.proj_file_box.findData(file_path)
+    #     if index >= 0:
+    #         self.proj_file_box.setCurrentIndex(index)
+    #     else:
+    #         # File not in dropdown, refresh and try again
+    #         self.refresh_h5_files()
+    #         index = self.proj_file_box.findData(file_path)
+    #         if index >= 0:
+    #             self.proj_file_box.setCurrentIndex(index)
 
-        # Call the existing view full method
-        self.view_full_reconstruction()
+    #     # Call the existing view full method
+    #     self.view_full_reconstruction()
 
     def _batch_run_try_single(self, file_path):
         """Run try reconstruction on a single file using the queue system"""
@@ -3916,6 +3688,7 @@ class TomoGUI(QWidget):
             return
 
         num_gpus = self.batch_gpus_per_machine.value()
+        print(f'this is num gpus {num_gpus} before start')
         machine_text = f" on {machine}" if machine != "Local" else ""
 
         reply = QMessageBox.question(
