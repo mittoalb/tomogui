@@ -1993,6 +1993,13 @@ class TomoGUI(QWidget):
 
             self.batch_file_main_table.setCellWidget(row, 2, cor_input)
             file_info['cor_input'] = cor_input
+            #allow modify table directly but also update rot_cen.json
+            try:
+                cor_input.editingFinished.connect(
+                    lambda fp=f, r=row: self._on_main_cor_edited(fp,r)
+                )
+            except Exception:
+                pass
 
             # Status
             self.batch_file_main_table.setItem(row, 3, status_item)
@@ -2026,6 +2033,54 @@ class TomoGUI(QWidget):
             self.highlight_scan = h5_files[0] #always the latest coming in scan
             self.highlight_row = 0
             self.log_output.append(f'Clicked on {self.highlight_scan}')
+
+    def _on_main_cor_edited(self, file_path:str, row:int):
+        """
+        Called when the COR QLineEdit in the MAIN table is edited.
+        Writes/updates data_folder/rot_cen.json using full file path keys.
+        """
+        data_folder = self.data_path.text().strip()
+        if not data_folder:
+            return
+        json_path = os.path.join(data_folder, "rot_cen.json")
+        # Get the widget (QLineEdit) from the table
+        w = self.batch_file_main_table.cellWidget(row, 2)
+        if w is None:
+            return
+        txt = w.text().strip()
+        if txt == "":
+            return  # user cleared it; you can choose to delete from json if you want
+        # Validate numeric
+        try:
+            float(txt)
+        except ValueError:
+            self.log_output.append(f'<span style="color:red;">❌ Invalid COR "{txt}" for {os.path.basename(file_path)}</span>')
+            return
+        # Load existing JSON (robust)
+        cor_data = {}
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, "r") as f:
+                    cor_data = json.load(f) or {}
+            except Exception:
+                cor_data = {}
+        # Update + write
+        cor_data[file_path] = txt
+        try:
+            with open(json_path, "w") as f:
+                json.dump(cor_data, f, indent=2)
+            self.log_output.append(f'<span style="color:green;">✔ COR updated:'
+                                    f'{os.path.basename(file_path)} → {txt}</span>')
+        except Exception as e:
+            self.log_output.append(f'<span style="color:red;">❌ Failed to write rot_cen.json: {e}</span>')
+            return
+        # Keep in-memory copy consistent
+        self.cor_data = cor_data
+        # Keep your list consistent: store the widget, not a string
+        try:
+            self.batch_file_main_list[row]["cor_input"] = w
+        except Exception:
+            pass    
 
     def refresh_h5_files(self):
         self.proj_file_box.clear()
@@ -2537,11 +2592,15 @@ class TomoGUI(QWidget):
             with open(json_path, "w") as f:
                 json.dump(self.cor_data, f, indent=2)
             self.log_output.append(f"\u2705[INFO] COR saved for: {proj_file}")
-            cor_value_item = QLineEdit(cor_value) # add cor value
-            cor_value_item.setAlignment(Qt.AlignCenter)
-            cor_value_item.setFixedWidth(80)
-            self.batch_file_main_table.setCellWidget(row, 2, cor_value_item)
-            self.batch_file_main_list[row]['cor_input'] = cor_value
+            w = self.batch_file_main_table.cellWidget(row, 2)
+            if w is None:
+                w = QLineEdit()
+                w.setAlignment(Qt.AlignCenter)
+                w.setFixedWidth(80)
+                self.batch_file_main_table.setCellWidget(row, 2, w)
+            w.setText(str(cor_value))
+            # keep list storing the widget
+            self.batch_file_main_list[row]['cor_input'] = w
         except Exception as e:
             self.log_output.append(f'<span style="color:red;">\u274cFailed to save rot_cen.json: {e}</span>')
             return
@@ -3780,12 +3839,10 @@ class TomoGUI(QWidget):
             self.log_output.append(
                 f'<span style="color:blue;">➕ Added {len(selected_files)} job(s) to running queue</span>'
             )
-            self.batch_queue_label.setText(f"Queue: {len(self.batch_job_queue)} jobs waiting")
             return
 
         # Start new queue
         self.batch_running = True
-        self.batch_stop_btn.setEnabled(True)
         self.batch_job_queue = jobs_to_add
         self.batch_running_jobs = {}
         self.batch_available_gpus = list(range(num_gpus))
@@ -3795,9 +3852,6 @@ class TomoGUI(QWidget):
         self.batch_total_jobs = len(selected_files)
         self.batch_completed_jobs = 0
 
-        self.batch_status_label.setText(f"Starting batch queue on {machine} with {num_gpus} GPU(s)")
-        self.batch_progress_bar.setValue(0)
-        self.batch_queue_label.setText(f"Queue: {len(self.batch_job_queue)} jobs waiting")
         QApplication.processEvents()
 
         progress_window_opened = False  #gate progress window
@@ -3820,7 +3874,6 @@ class TomoGUI(QWidget):
                 except RuntimeError:
                     pass
 
-                self.batch_queue_label.setText(f"Queue: {len(self.batch_job_queue)} jobs waiting")
                 QApplication.processEvents()
 
                 # capture return value (process) and validate it
@@ -3914,15 +3967,11 @@ class TomoGUI(QWidget):
 
             # Update progress
             progress = int((self.batch_completed_jobs / self.batch_total_jobs) * 100) if self.batch_total_jobs else 0
-            self.batch_progress_bar.setValue(progress)
 
             if progress_window_opened:
                 self.progress_window.batch_progress_bar.setValue(progress)
                 active_gpus = sorted(self.batch_running_jobs.keys())
                 gpu_status = f"GPUs: {active_gpus}" if active_gpus else "GPUs: idle"
-                self.batch_status_label.setText(
-                    f"Completed {self.batch_completed_jobs}/{self.batch_total_jobs} | {gpu_status} | Queue: {len(self.batch_job_queue)}"
-                )
                 self.progress_window.batch_status_label.setText(
                     f"Completed {self.batch_completed_jobs}/{self.batch_total_jobs} | {gpu_status} | Queue: {len(self.batch_job_queue)}"
                 )
@@ -3935,12 +3984,6 @@ class TomoGUI(QWidget):
                 time.sleep(0.2)
 
         # Finalize
-        self.batch_progress_bar.setValue(100)
-        self.batch_status_label.setText(f"Batch queue complete: {self.batch_completed_jobs} files processed on {self.batch_current_machine}")
-        self.batch_queue_label.setText("Queue: 0 jobs waiting")
-        self.batch_running = False
-        self.batch_stop_btn.setEnabled(False)
-
         if progress_window_opened:
             self.progress_window.batch_progress_bar.setValue(100)
             self.progress_window.batch_status_label.setText("Batch completed.")
