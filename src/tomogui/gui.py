@@ -3876,6 +3876,35 @@ class TomoGUI(QWidget):
         self._run_batch_with_queue(selected_files, recon_type='full', num_gpus=num_gpus, machine=machine)
 
   #=========helper to update table based on filename========================
+    def _get_full_recon_status(self, file_path):
+        """
+        Check the full reconstruction output directory and return status with slice range.
+        Returns: (status_text, status_color)
+        """
+        try:
+            table_folder = self.data_path.text()
+            if not table_folder:
+                return "Done full", "green"
+
+            filename = os.path.basename(file_path)
+            proj_name = os.path.splitext(filename)[0]
+            full_dir = os.path.join(f"{table_folder}_rec", f"{proj_name}_rec")
+
+            # Check if output directory exists and has TIFF files
+            if os.path.isdir(full_dir):
+                tiff_files = sorted(glob.glob(os.path.join(full_dir, "*.tiff")))
+                if len(tiff_files) > 0:
+                    # Get slice numbers from first and last file
+                    num_1 = int(Path(tiff_files[0]).stem.split("_")[-1])
+                    num_2 = int(Path(tiff_files[-1]).stem.split("_")[-1])
+                    return f"Full {num_1}-{num_2}", "green"
+
+            # Fallback if directory doesn't exist or no files found
+            return "Done full", "green"
+        except Exception as e:
+            # If anything goes wrong, just return basic status
+            return "Done full", "green"
+
     def _find_row_by_filename(self, filename, filename_col=1):
         table = self.batch_file_main_table
         for row in range(table.rowCount()):
@@ -4039,8 +4068,8 @@ class TomoGUI(QWidget):
                                 status_text = "Done try"
                                 status_color = "orange"
                             else:  # full
-                                status_text = "Done full"
-                                status_color = "green"
+                                # Check output directory for actual slice numbers
+                                status_text, status_color = self._get_full_recon_status(file_info["filename"])
 
                             self._set_status_by_filename(
                                 os.path.basename(file_info["filename"]),
