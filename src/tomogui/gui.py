@@ -416,6 +416,7 @@ class TomoGUI(QWidget):
         # ==== RIGHT PANEL ====
         right_layout = QVBoxLayout()
         toolbar_row = QHBoxLayout()
+        toolbar_row.setSpacing(8)
 
         # Check if VisPy is available
         if not VISPY_AVAILABLE:
@@ -450,7 +451,7 @@ class TomoGUI(QWidget):
             self.setLayout(main_layout)
             return
         self.view = self.canvas.central_widget.add_view()
-        self.view.camera = scene.PanZoomCamera()
+        self.view.camera = scene.PanZoomCamera(aspect=1) #
         self.view.camera.flip = (False, True, False)  # Flip Y for image coords
         self.image_visual = visuals.Image(cmap='grays', parent=self.view.scene)
         self.canvas_widget = self.canvas.native
@@ -470,16 +471,23 @@ class TomoGUI(QWidget):
         self.canvas.events.mouse_release.connect(self._on_vispy_mouse_release)
 
         # Coordinate label
+        coord_label = QLabel("(x,y):val ")
+        coord_label.setFixedWidth(80)
+        coord_label.setStyleSheet("font-size: 11pt;")
+        toolbar_row.addWidget(coord_label)
         self.coord_label = QLabel("")
-        self.coord_label.setFixedWidth(350)
+        self.coord_label.setFixedWidth(150)
         self.coord_label.setStyleSheet("font-size: 11pt;")
         toolbar_row.addWidget(self.coord_label)
-        toolbar_row.addSpacing(10)
 
         # Colormap dropdown
-        toolbar_row.addWidget(QLabel("Cmap"))
+        cmap_label = QLabel(" Cmap ")
+        cmap_label.setStyleSheet("font-size: 11pt;")
+        cmap_label.setFixedWidth(45)
+        toolbar_row.addWidget(cmap_label)
         self.cmap_box = QComboBox()
-        self.cmap_box.setFixedWidth(51)
+        self.cmap_box.setFixedWidth(72)
+        self.cmap_box.setStyleSheet("font-size: 11pt;")
         self.cmap_box.addItems(["gray", "viridis", "plasma", "inferno", "magma", "cividis"])
         self.cmap_box.setCurrentText(self.default_cmap)
         self.cmap_box.currentIndexChanged.connect(self.update_cmap)
@@ -487,39 +495,50 @@ class TomoGUI(QWidget):
 
         # Image control buttons
         draw_box_btn = QPushButton("Draw")
+        draw_box_btn.setStyleSheet("font-size: 11pt;")
         draw_box_btn.clicked.connect(self.draw_box)
-        draw_box_btn.setFixedWidth(42)
+        draw_box_btn.setFixedWidth(55)
         auto_scale_btn = QPushButton("Auto")
-        auto_scale_btn.setFixedWidth(42)
+        auto_scale_btn.setStyleSheet("font-size: 11pt;")
+        auto_scale_btn.setFixedWidth(55)
         auto_scale_btn.clicked.connect(self.auto_img_contrast)
         reset_scale_btn = QPushButton("Reset")
-        reset_scale_btn.setFixedWidth(42)
+        reset_scale_btn.setStyleSheet("font-size: 11pt;")
+        reset_scale_btn.setFixedWidth(65)
         reset_scale_btn.clicked.connect(self.reset_img_contrast)
         toolbar_row.addWidget(draw_box_btn)
         toolbar_row.addWidget(auto_scale_btn)
         toolbar_row.addWidget(reset_scale_btn)
 
         # Min/Max inputs
-        toolbar_row.addWidget(QLabel("Min"))
+        min_label = QLabel(" Min")
+        min_label.setFixedWidth(35)
+        min_label.setStyleSheet("font-size: 11pt;")
+        toolbar_row.addWidget(min_label)
         self.min_input = QLineEdit()
-        self.min_input.setFixedWidth(50)
+        self.min_input.setFixedWidth(65)
+        self.min_input.setStyleSheet("font-size: 11pt;")
         self.min_input.editingFinished.connect(self.update_vmin_vmax)
         toolbar_row.addWidget(self.min_input)
 
-        toolbar_row.addWidget(QLabel("Max"))
+        max_label = QLabel(" Max")
+        max_label.setFixedWidth(35)
+        max_label.setStyleSheet("font-size: 11pt;")
+        toolbar_row.addWidget(max_label)
         self.max_input = QLineEdit()
-        self.max_input.setFixedWidth(50)
+        self.max_input.setStyleSheet("font-size: 11pt;")
+        self.max_input.setFixedWidth(65)
         self.max_input.editingFinished.connect(self.update_vmin_vmax)
         toolbar_row.addWidget(self.max_input)
 
         # Theme toggle button
-        toolbar_row.addSpacing(10)
         self.theme_toggle_btn = QPushButton("🌙" if self.theme_manager.get_current_theme() == 'bright' else "☀")
         self.theme_toggle_btn.setFixedWidth(35)
         self.theme_toggle_btn.setToolTip("Toggle bright/dark theme")
         self.theme_toggle_btn.clicked.connect(self._toggle_theme)
         toolbar_row.addWidget(self.theme_toggle_btn)
 
+        toolbar_row.addStretch(1)
         right_layout.addLayout(toolbar_row)
         self.canvas_widget.installEventFilter(self)
 
@@ -2571,7 +2590,7 @@ class TomoGUI(QWidget):
         code = self.run_command_live(cmd, proj_file=proj_file, job_label="Try recon", wait=True, cuda_devices=gpu)
         try:
             if code == 0:
-                self._update_row(row=self.highlight_row,color='orange',status='done try') #change table content and self.batch_file_list
+                self._update_row(row=self.highlight_row,color='orange',status='Done try') #change table content and self.batch_file_list
                 self.log_output.append(f'<span style="color:green;">\u2705 Done try recon {proj_file}</span>')
             else:
                 self.log_output.append(f'<span style="color:red;">\u274c Try recon {proj_file} failed</span>')
@@ -2823,6 +2842,7 @@ class TomoGUI(QWidget):
         self._drawing_roi = True
         self.roi_extent = None
         self._roi_start = None
+        self.view.camera.interactive = False
         self.log_output.append("Click and drag to draw ROI. Release to set. Click again to clear.")
 
     def _on_vispy_mouse_click(self, event):
@@ -2834,7 +2854,7 @@ class TomoGUI(QWidget):
                 self.log_output.append('<span style="color:green;">ROI cleared</span>')
             return
 
-        tr = self.view.scene.transform
+        tr = self.image_visual.get_transform(map_from='canvas', map_to='visual')
         pos = tr.map(event.pos)[:2]
         self._roi_start = pos
 
@@ -2843,7 +2863,7 @@ class TomoGUI(QWidget):
         if not self._drawing_roi or self._roi_start is None:
             return
 
-        tr = self.view.scene.transform
+        tr = self.image_visual.get_transform(map_from='canvas', map_to='visual')
         pos = tr.map(event.pos)[:2]
 
         x0, y0 = self._roi_start
@@ -2853,6 +2873,7 @@ class TomoGUI(QWidget):
 
         # Draw ROI rectangle with vispy
         self._draw_roi_visual()
+        self.view.camera.interactive = True
 
         self.log_output.append(
             f"ROI set: x[{int(self.roi_extent[0])}:{int(self.roi_extent[1])}], "
@@ -2865,15 +2886,26 @@ class TomoGUI(QWidget):
             return
 
         x0, x1, y0, y1 = self.roi_extent
-        # Create rectangle vertices
-        vertices = np.array([
-            [x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]
-        ], dtype=np.float32)
-
-        if self._roi_visual is not None:
-            self._roi_visual.parent = None
-
-        self._roi_visual = visuals.Line(pos=vertices, color='red', width=2, parent=self.view.scene)
+        w, h = (x1 - x0), (y1 - y0)
+        cx, cy = (x0 + w/2, y0 + h/2)
+        if self._roi_visual is None:
+            self._roi_visual = scene.visuals.Rectangle(
+                                center=(cx,cy),
+                                width=w,
+                                height=h,
+                                color=(0, 0, 0, 0),     # transparent fill
+                                border_color='red',
+                                border_width=2,
+                                parent=self.image_visual
+                            )
+            self._roi_visual.set_gl_state(depth_test=False, blend=True) #force it on top of image
+        else:
+            if self._roi_visual.parent is None:
+                self._roi_visual.parent = self.image_visual
+            self._roi_visual.center = (cx,cy)
+            self._roi_visual.width = w
+            self._roi_visual.height = h
+        self._roi_visual.visible = True
         self.canvas.update()
 
     def _clear_roi(self):
@@ -2892,7 +2924,7 @@ class TomoGUI(QWidget):
                 self.coord_label.setText("")
             return
 
-        tr = self.view.scene.transform
+        tr = self.image_visual.get_transform(map_from='canvas', map_to='visual')
         pos = tr.map(event.pos)[:2]
         x, y = int(pos[0]), int(pos[1])
 
@@ -3985,6 +4017,7 @@ class TomoGUI(QWidget):
                 f'<span style="color:gray;">🔄 Queue loop: {len(self.batch_job_queue)} queued, {len(self.batch_running_jobs)} running, {len(self.batch_available_gpus)} GPUs available</span>'
             )
             QApplication.processEvents()
+            time.sleep(2) #less print in log
 
             # Start new jobs if GPUs are available and jobs are queued
             while self.batch_available_gpus and self.batch_job_queue:
