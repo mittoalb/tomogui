@@ -1,4 +1,4 @@
-import os, glob, json
+import os, glob, json,time
 import numpy as np
 
 # Configure OpenGL for remote display BEFORE importing VisPy
