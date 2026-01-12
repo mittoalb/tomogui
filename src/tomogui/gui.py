@@ -2784,7 +2784,7 @@ class TomoGUI(QWidget):
             return
         self._clear_roi()
         self._reset_view_state()
-        self.set_image_scale(self.preview_files[0])
+        #self.set_image_scale(self.preview_files[0])
         try:
             self.slice_slider.valueChanged.disconnect()
         except TypeError:
@@ -2808,7 +2808,7 @@ class TomoGUI(QWidget):
             return
         self._clear_roi()
         self._reset_view_state()
-        self.set_image_scale(self.full_files[0])
+        #self.set_image_scale(self.full_files[0])
         try:
             self.slice_slider.valueChanged.disconnect()
         except TypeError:
@@ -3009,22 +3009,22 @@ class TomoGUI(QWidget):
                 self.refresh_current_image()
 
     def update_raw_slice(self):
-        self._remember_view()
         idx = self.slice_slider.value()
         if 0 <= idx < self.raw_files_num:
             self.show_image(img_path=idx, flag="raw")
+        self._remember_view()
 
     def update_try_slice(self):
-        self._remember_view()
         idx = self.slice_slider.value()
         if 0 <= idx < len(self.preview_files):
             self.show_image(self.preview_files[idx], flag=None)
+        self._remember_view()
 
     def update_full_slice(self):
-        self._remember_view()
         idx = self.slice_slider.value()
         if 0 <= idx < len(self.full_files):
             self.show_image(self.full_files[idx], flag=None)
+        self._remember_view()
 
     def _safe_open_image(self, path, flag=None, retries=3): 
         #add flag to seperate raw, recon
@@ -3099,9 +3099,6 @@ class TomoGUI(QWidget):
         """Forget any prior zoom/pan so the next image shows full frame."""
         self._last_camera_rect = None
         self._last_image_shape = None
-
-
-
 
     # ===== TOMOLOG METHODS =====
     def get_note_value(self):
