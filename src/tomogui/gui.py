@@ -351,12 +351,17 @@ class TomoGUI(QWidget):
         deselect_all_btn.clicked.connect(self._batch_deselect_all)
         deselect_all_btn.setFixedWidth(120)
         batch_ops.addWidget(deselect_all_btn)
-        view_selected_btn = QPushButton("View Selected Data")
-        view_selected_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
-        view_selected_btn.setToolTip("Open HDF5 viewer for first selected file")
-        view_selected_btn.clicked.connect(self._batch_view_selected_data)
-        view_selected_btn.setFixedWidth(135)
-        batch_ops.addWidget(view_selected_btn)
+        # view_selected_btn = QPushButton("View Selected Data")
+        # view_selected_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        # view_selected_btn.setToolTip("Open HDF5 viewer for first selected file")
+        # view_selected_btn.clicked.connect(self._batch_view_selected_data)
+        # view_selected_btn.setFixedWidth(135)
+        select_donetry_btn = QPushButton("Select done try")
+        select_donetry_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        select_donetry_btn.setToolTip("Select files that has done try reconstruction")
+        select_donetry_btn.clicked.connect(self._select_done_try)
+        select_donetry_btn.setFixedWidth(135)
+        batch_ops.addWidget(select_donetry_btn)
         separator_batch = QLabel("  |  ")
         separator_batch.setStyleSheet("QLabel { font-size: 11pt; }")
         separator_batch.setFixedWidth(23)
@@ -2679,13 +2684,13 @@ class TomoGUI(QWidget):
         """Select all files in the batch list"""
         for file_info in self.batch_file_main_list:
             file_info['checkbox'].setChecked(True)
-        self.log_output(f'<span style="color:green;">Select all files in table</span>')
+        self.log_output.append(f'<span style="color:green;">Select all files in table</span>')
 
     def _batch_deselect_all(self):
         """Deselect all files in the batch list"""
         for file_info in self.batch_file_main_list:
             file_info['checkbox'].setChecked(False)
-        self.log_output(f'<span style="color:green;">Unselect all files in table</span>')
+        self.log_output.append(f'<span style="color:green;">Unselect all files in table</span>')
 
     def _get_batch_machine_command(self, cmd, machine):
         """
@@ -3010,21 +3015,24 @@ class TomoGUI(QWidget):
 
     def update_raw_slice(self):
         idx = self.slice_slider.value()
+        self._remember_view()
         if 0 <= idx < self.raw_files_num:
             self.show_image(img_path=idx, flag="raw")
-        self._remember_view()
+        
 
     def update_try_slice(self):
         idx = self.slice_slider.value()
+        self._remember_view()
         if 0 <= idx < len(self.preview_files):
             self.show_image(self.preview_files[idx], flag=None)
-        self._remember_view()
+        
 
     def update_full_slice(self):
         idx = self.slice_slider.value()
+        self._remember_view()
         if 0 <= idx < len(self.full_files):
             self.show_image(self.full_files[idx], flag=None)
-        self._remember_view()
+        
 
     def _safe_open_image(self, path, flag=None, retries=3): 
         #add flag to seperate raw, recon
@@ -3767,6 +3775,17 @@ class TomoGUI(QWidget):
 
         if len(selected_files) > 1:
             self.log_output.append(f'<span style="color:blue;">ℹ️  {len(selected_files)} files selected, opened first: {os.path.basename(first_file)}</span>')
+
+    def _select_done_try(self):
+        found = False
+        for file_info in self.batch_file_main_list:
+            if file_info['status'] == "Done try":
+                file_info['checkbox'].setChecked(True)
+                found = True
+        if not found:
+            self.log_output.append(f"No file is in Done try state")
+        else:
+            self.log_output.append(f"Select all files done try")
 
     # def _batch_view_try(self, file_path):
     #     """View try reconstruction for a specific file"""
