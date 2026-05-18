@@ -273,14 +273,25 @@ class ChatWorker(QObject):
         try:
             self.started_response.emit()
             # Gateways (Argo, etc.) often don't pipe SSE streams cleanly
-            # and reject extras like `output_config`. When a custom base_url
-            # is in use, fall back to non-streaming `create()` with a
-            # conservative max_tokens — same call pystream makes.
+            # and reject extras like `output_config` or the extended-cache
+            # `ttl` field. When a custom base_url is in use, fall back to
+            # non-streaming `create()` with a conservative max_tokens and
+            # strip ttl from cache_control — same shape pystream sends.
             if self._base_url:
+                sanitised_system = []
+                for blk in (system_blocks or []):
+                    if not isinstance(blk, dict):
+                        sanitised_system.append(blk)
+                        continue
+                    cc = blk.get("cache_control")
+                    if isinstance(cc, dict) and "ttl" in cc:
+                        cc = {k: v for k, v in cc.items() if k != "ttl"}
+                        blk = {**blk, "cache_control": cc}
+                    sanitised_system.append(blk)
                 response = client.messages.create(
                     model=self._model,
                     max_tokens=4096,
-                    system=system_blocks,
+                    system=sanitised_system,
                     messages=messages,
                 )
                 text = "".join(
@@ -313,7 +324,9 @@ class ChatWorker(QObject):
 
         except anthropic.AuthenticationError:
             self.error.emit(
-                "Invalid API key (401). Click 'Edit key' to update."
+                "Invalid API key (401). Click 'Edit key' next to the model "
+                "dropdown to enter a new one, or fix "
+                "$ANTHROPIC_API_KEY / ~/.claude/settings.json and restart."
             )
         except anthropic.APIConnectionError as e:
             self.error.emit(
@@ -413,6 +426,13 @@ class ChatBotDialog(QDialog):
                 lambda: self._on_model_changed(self.model_combo.currentText())
             )
         header.addWidget(self.model_combo)
+        self.edit_key_btn = QPushButton("Edit key")
+        self.edit_key_btn.setToolTip(
+            "Enter or replace the API key (Anthropic console key, "
+            "Argonne Argo username, or other gateway token)."
+        )
+        self.edit_key_btn.clicked.connect(self._on_edit_key)
+        header.addWidget(self.edit_key_btn)
         self.new_chat_btn = QPushButton("New chat")
         self.new_chat_btn.setToolTip("Clear the conversation history")
         self.new_chat_btn.clicked.connect(self._on_new_chat)
@@ -624,6 +644,23 @@ class ChatBotDialog(QDialog):
             _save_chatbot_config({"model": name})
         except OSError:
             pass  # not fatal — selection still applies for this session
+
+    def _on_edit_key(self):
+        """Pop the key entry dialog and update the live credentials."""
+        new_key = self._prompt_for_key()
+        if not new_key:
+            return
+        # Re-resolve base_url so the new key pairs with whatever the env /
+        # settings file dictates (or stays with whatever was cached).
+        _, base_url = _find_credentials()
+        self._cached_key = new_key
+        self._cached_base_url = base_url or self._cached_base_url
+        self._worker.set_credentials(self._cached_key, self._cached_base_url)
+        src = self._describe_credential_source()
+        self.status_label.setText(
+            f"credentials updated — {src}"
+            + (f" → {self._cached_base_url}" if self._cached_base_url else "")
+        )
 
     def _on_new_chat(self):
         if self._busy:
