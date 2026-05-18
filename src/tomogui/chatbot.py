@@ -35,15 +35,27 @@ KNOWLEDGE_PATH = Path(__file__).parent / "chatbot_knowledge.md"
 SETTINGS_PATH = Path.home() / ".config" / "tomogui" / "api_key"
 CHATBOT_CONFIG_PATH = Path.home() / ".config" / "tomogui" / "chatbot.json"
 
-# Listed in roughly best→cheapest order. The Argo gateway may only support
-# a subset; users can pick whichever the gateway accepts.
-MODELS = [
+# Two naming styles coexist depending on the endpoint:
+#   • Anthropic console & SDK   → "claude-opus-4-7"
+#   • Argonne Argo gateway       → "Claude Opus 4.7" (display form)
+# The dropdown lists both so the user can pick the one their endpoint
+# accepts; it's editable for anything else.
+MODELS_ANTHROPIC = [
     "claude-opus-4-7",
     "claude-opus-4-6",
     "claude-sonnet-4-6",
     "claude-haiku-4-5",
 ]
-DEFAULT_MODEL = MODELS[0]
+MODELS_ARGO = [
+    "Claude Opus 4.7",
+    "Claude Opus 4.6",
+    "Claude Sonnet 4.6",
+    "Claude Haiku 4.5",
+    "GPT-4o",
+    "GPT-5",
+]
+MODELS = MODELS_ANTHROPIC + MODELS_ARGO
+DEFAULT_MODEL = MODELS_ANTHROPIC[0]
 
 
 def _load_chatbot_config() -> dict:
@@ -136,6 +148,14 @@ def _find_credentials() -> tuple[str | None, str | None]:
     if env_key:
         return env_key, base_url
 
+    # 1b. Same env block of ~/.claude/settings.json — same place
+    # ANTHROPIC_BASE_URL lives. Gateways like Argo issue identifier-style
+    # keys (e.g. an ANL username), not sk-ant-… tokens, so we accept any
+    # non-empty string here.
+    settings_key = settings_env.get("ANTHROPIC_API_KEY", "").strip()
+    if settings_key:
+        return settings_key, base_url
+
     # 2. Claude Code's apiKeyHelper (Argonne-style flow)
     helper = settings.get("apiKeyHelper")
     if isinstance(helper, str) and helper.strip():
@@ -143,11 +163,12 @@ def _find_credentials() -> tuple[str | None, str | None]:
         if v:
             return v, base_url
 
-    # 3. Tomogui's own settings file
+    # 3. Tomogui's own settings file. Accept any non-empty value — gateway
+    # keys (Argo etc.) are not sk-ant-… prefixed.
     if SETTINGS_PATH.exists():
         try:
             v = SETTINGS_PATH.read_text(encoding="utf-8").strip()
-            if v.startswith("sk-ant-"):
+            if v:
                 return v, base_url
         except OSError:
             pass
@@ -159,8 +180,8 @@ def _find_credentials() -> tuple[str | None, str | None]:
             data = json.loads(cc.read_text(encoding="utf-8"))
             for field in ("api_key", "anthropic_api_key", "key"):
                 v = data.get(field, "")
-                if isinstance(v, str) and v.startswith("sk-ant-"):
-                    return v, base_url
+                if isinstance(v, str) and v.strip():
+                    return v.strip(), base_url
         except (OSError, json.JSONDecodeError):
             pass
 
@@ -343,10 +364,24 @@ class ChatBotDialog(QDialog):
             self.model_combo.insertItem(0, self._model)
         self.model_combo.setCurrentText(self._model)
         self.model_combo.setToolTip(
-            "Pick a Claude model. The Argo gateway may only support a subset.\n"
-            "You can also type a custom model string (must be a valid Anthropic model ID)."
+            "Pick or type a model id. Examples:\n"
+            "  • Anthropic console:  claude-opus-4-7\n"
+            "  • Argonne Argo:        Claude Opus 4.7 / GPT-4o / GPT-5\n"
+            "Selection is saved when you press Enter, click elsewhere, or "
+            "pick from the dropdown."
         )
-        self.model_combo.currentTextChanged.connect(self._on_model_changed)
+        # Wire to `activated` (only fires when a dropdown item is picked)
+        # and `editingFinished` on the inner line edit (only fires when
+        # focus leaves or Enter is pressed) — NOT `currentTextChanged`,
+        # which fires on every keystroke and would cause partial values
+        # to be saved and sent to the worker mid-typing.
+        self.model_combo.activated.connect(
+            lambda _i: self._on_model_changed(self.model_combo.currentText())
+        )
+        if self.model_combo.lineEdit() is not None:
+            self.model_combo.lineEdit().editingFinished.connect(
+                lambda: self._on_model_changed(self.model_combo.currentText())
+            )
         header.addWidget(self.model_combo)
         self.new_chat_btn = QPushButton("New chat")
         self.new_chat_btn.setToolTip("Clear the conversation history")
@@ -587,19 +622,20 @@ class ChatBotDialog(QDialog):
     def _prompt_for_key(self) -> str:
         key, ok = QInputDialog.getText(
             self,
-            "Enter Claude API key",
-            "Paste your Anthropic API key (starts with sk-ant-…).\n"
-            "It will be saved to ~/.config/tomogui/api_key with mode 0600.",
+            "Enter API key",
+            "Paste your API key.\n\n"
+            "• Anthropic console:  sk-ant-…\n"
+            "• Argonne Argo:       your ANL username (e.g. amittone)\n"
+            "• Other gateway:      whatever the gateway issued you\n\n"
+            "Saved to ~/.config/tomogui/api_key (mode 0600).",
             QLineEdit.Password,
         )
         if not ok:
             return ""
         key = key.strip()
-        if not key.startswith("sk-ant-"):
+        if not key:
             QMessageBox.warning(
-                self,
-                "Invalid key",
-                "API keys start with 'sk-ant-'. Nothing was saved.",
+                self, "Invalid key", "Key was empty. Nothing saved.",
             )
             return ""
         try:
