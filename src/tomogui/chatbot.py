@@ -66,7 +66,17 @@ def _load_chatbot_config() -> dict:
     try:
         data = json.loads(CHATBOT_CONFIG_PATH.read_text(encoding="utf-8"))
         if isinstance(data, dict):
-            defaults.update({k: v for k, v in data.items() if k in defaults})
+            # Drop empty / whitespace-only values — earlier versions of the
+            # chatbot used currentTextChanged which would write "" while the
+            # user was deleting and retyping, leaving a corrupt file that
+            # makes the dropdown look empty on next launch.
+            cleaned = {
+                k: v for k, v in data.items()
+                if k in defaults
+                and isinstance(v, str)
+                and v.strip()
+            }
+            defaults.update(cleaned)
     except (OSError, json.JSONDecodeError):
         pass
     return defaults
@@ -262,25 +272,44 @@ class ChatWorker(QObject):
 
         try:
             self.started_response.emit()
-            with client.messages.stream(
-                model=self._model,
-                max_tokens=64000,
-                system=system_blocks,
-                messages=messages,
-                output_config={"effort": "medium"},
-            ) as stream:
-                for text in stream.text_stream:
-                    if self._cancel:
-                        break
+            # Gateways (Argo, etc.) often don't pipe SSE streams cleanly
+            # and reject extras like `output_config`. When a custom base_url
+            # is in use, fall back to non-streaming `create()` with a
+            # conservative max_tokens — same call pystream makes.
+            if self._base_url:
+                response = client.messages.create(
+                    model=self._model,
+                    max_tokens=4096,
+                    system=system_blocks,
+                    messages=messages,
+                )
+                text = "".join(
+                    getattr(b, "text", "") for b in response.content
+                    if getattr(b, "type", None) == "text"
+                )
+                if text:
                     self.chunk.emit(text)
-                if self._cancel:
-                    # Don't call get_final_message — it would block waiting
-                    # for the rest of the response. Exiting the with-block
-                    # closes the HTTP stream.
-                    self.cancelled.emit()
-                    return
-                final = stream.get_final_message()
-            self.done.emit(final)
+                self.done.emit(response)
+            else:
+                with client.messages.stream(
+                    model=self._model,
+                    max_tokens=64000,
+                    system=system_blocks,
+                    messages=messages,
+                    output_config={"effort": "medium"},
+                ) as stream:
+                    for text in stream.text_stream:
+                        if self._cancel:
+                            break
+                        self.chunk.emit(text)
+                    if self._cancel:
+                        # Don't call get_final_message — it would block waiting
+                        # for the rest of the response. Exiting the with-block
+                        # closes the HTTP stream.
+                        self.cancelled.emit()
+                        return
+                    final = stream.get_final_message()
+                self.done.emit(final)
 
         except anthropic.AuthenticationError:
             self.error.emit(
@@ -335,7 +364,8 @@ class ChatBotDialog(QDialog):
         self._busy = False
         self._cached_key: str | None = None
         self._cached_base_url: str | None = None
-        self._model = _load_chatbot_config().get("model", DEFAULT_MODEL)
+        loaded_model = _load_chatbot_config().get("model", DEFAULT_MODEL)
+        self._model = loaded_model.strip() if isinstance(loaded_model, str) and loaded_model.strip() else DEFAULT_MODEL
 
         self._build_ui()
         self._setup_worker()
