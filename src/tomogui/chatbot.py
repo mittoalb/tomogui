@@ -20,6 +20,7 @@ Credential discovery (returns api_key + optional base_url):
 import functools
 import json
 import os
+import sys
 import subprocess
 from pathlib import Path
 
@@ -278,16 +279,30 @@ class ChatWorker(QObject):
             # non-streaming `create()` with a conservative max_tokens and
             # strip ttl from cache_control — same shape pystream sends.
             if self._base_url:
+                # Sanitise system blocks: drop cache_control entirely on
+                # gateways since some (Argo) reject any extended cache hints
+                # outright, not just the ttl sub-field.
                 sanitised_system = []
                 for blk in (system_blocks or []):
                     if not isinstance(blk, dict):
                         sanitised_system.append(blk)
                         continue
-                    cc = blk.get("cache_control")
-                    if isinstance(cc, dict) and "ttl" in cc:
-                        cc = {k: v for k, v in cc.items() if k != "ttl"}
-                        blk = {**blk, "cache_control": cc}
+                    blk = {k: v for k, v in blk.items()
+                           if k != "cache_control"}
                     sanitised_system.append(blk)
+                # Stderr breadcrumb so the launching terminal shows what
+                # we actually send — invaluable for diagnosing 401s when
+                # pystream works but tomogui doesn't.
+                key_repr = (self._api_key[:3] + "…" + self._api_key[-2:]
+                            if self._api_key and len(self._api_key) > 5
+                            else "<short>")
+                print(
+                    f"[tomogui-chatbot] POST {self._base_url}/v1/messages  "
+                    f"model={self._model!r}  key={key_repr}  "
+                    f"system_blocks={len(sanitised_system)}  "
+                    f"messages={len(messages)}",
+                    file=sys.stderr, flush=True,
+                )
                 response = client.messages.create(
                     model=self._model,
                     max_tokens=4096,
@@ -692,7 +707,7 @@ class ChatBotDialog(QDialog):
             "Enter API key",
             "Paste your API key.\n\n"
             "• Anthropic console:  sk-ant-…\n"
-            "• Argonne Argo:       your ANL username (e.g. amittone)\n"
+            "• Argonne Argo:       your ANL username\n"
             "• Other gateway:      whatever the gateway issued you\n\n"
             "Saved to ~/.config/tomogui/api_key (mode 0600).",
             QLineEdit.Password,
