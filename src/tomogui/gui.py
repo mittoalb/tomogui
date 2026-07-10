@@ -2765,16 +2765,30 @@ class TomoGUI(QWidget):
         target_path = os.path.join(data_folder, "recon_params.json")
 
         def _writer():
+            import sys
+            import tempfile
+            tmp = None
             try:
-                tmp = target_path + ".tmp"
-                with open(tmp, "w") as fh:
+                # Unique tmp filename per thread avoids races when several
+                # writer threads are in flight against the same target.
+                fd, tmp = tempfile.mkstemp(prefix="recon_params.",
+                                           suffix=".tmp",
+                                           dir=data_folder)
+                with os.fdopen(fd, "w") as fh:
                     json.dump(to_write, fh, indent=2)
                 os.replace(tmp, target_path)
+                tmp = None
             except Exception as exc:
                 # Background thread — can't touch GUI directly. Print to
                 # stderr so it shows up in the launching shell / log file.
                 print(f"[tomogui] background param save failed: {exc}",
                       file=sys.stderr)
+            finally:
+                if tmp and os.path.exists(tmp):
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
 
         import threading
         t = threading.Thread(target=_writer, daemon=True,
