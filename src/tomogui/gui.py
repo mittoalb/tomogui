@@ -1150,6 +1150,45 @@ class TomoGUI(QWidget):
 
         self.tabs.addTab(params_tab, "Reconstruction")
 
+    def _ai_cor_args(self, ai_search_method="fine"):
+        """Return tomocupy CLI flags that turn on its built-in AI COR finder
+        for a `try` reconstruction. Returns [] when the AI model path is not
+        set — callers then fall back to whatever COR method they were using.
+
+        Tomocupy runs the try recon and the AI center search in a single
+        subprocess and writes ``center_of_rotation.txt`` inside the try
+        output directory (``{data}_rec/try_center/{proj}/``).
+        """
+        model_path = self.ai_model_path.text().strip()
+        if not model_path or not os.path.exists(model_path):
+            return []
+        return [
+            "--rotation-axis-method", "ai",
+            "--ai-search-method", ai_search_method,
+            "--bin-infer-model-path", model_path,
+        ]
+
+    def _read_ai_cor_from_try_dir(self, proj_file):
+        """Read the last value written to center_of_rotation.txt inside the
+        try output directory for ``proj_file``. Returns the COR as a float
+        on success, or ``None`` if the file is missing/empty/unparseable."""
+        data_folder = self.data_path.text().strip()
+        if not data_folder:
+            return None
+        proj_name = os.path.splitext(os.path.basename(proj_file))[0]
+        cor_txt = os.path.join(f"{data_folder}_rec", "try_center",
+                               proj_name, "center_of_rotation.txt")
+        if not os.path.exists(cor_txt):
+            return None
+        try:
+            with open(cor_txt) as fh:
+                lines = [ln.strip() for ln in fh if ln.strip()]
+            if not lines:
+                return None
+            return float(lines[-1].split()[-1])
+        except (OSError, ValueError):
+            return None
+
     def _gather_params_args(self):
         args = []
         for flag, (kind, w, include_cb, _default) in self.param_widgets.items():
@@ -3421,201 +3460,141 @@ class TomoGUI(QWidget):
                     self.log_output.append(f'<span style="color:red;">\u26a0\ufe0f Could not remove {temp_try}: {e}</span>')
 
     def try_ai_reconstruction(self):
-        if self.highlight_scan:
-            self._persist_params_for_files([self.highlight_scan])
-        """Run Try reconstruction then AI inference to find best COR.
+        """Run Try + AI-COR (in a single tomocupy call) then Full recon.
+
+        The AI center-of-rotation search now lives inside tomocupy itself
+        (``--rotation-axis-method ai``), so we no longer run a separate
+        inference subprocess against the try TIFFs. Tomocupy performs the
+        try reconstruction, caches the slices internally, runs the AI
+        inference, and writes ``center_of_rotation.txt`` in the try output
+        directory. We then read that file and launch the full recon.
 
         Starting-COR policy: prefer the currently-highlighted row's COR if it
         is a valid number; otherwise fall back to the top-bar Try COR input.
-        This applies to both single-file and batch invocations."""
-        import re
-        from argparse import Namespace
-        from PIL import Image as _PIL_Image
+        """
+        proj_file = self.highlight_scan
+        if not proj_file:
+            self.log_output.append("❌ No file")
+            return
+        self._persist_params_for_files([proj_file])
 
         model_path = self.ai_model_path.text().strip()
         if not model_path or not os.path.exists(model_path):
             self.log_output.append('<span style="color:red;">❌ Invalid AI model path</span>')
             return
 
-        # Resolve the starting COR: row first, then top-bar.
+        # Resolve the starting COR seed: row first, then top-bar.
         row_cor = ""
         if self.highlight_row is not None:
             w = self.batch_file_main_table.cellWidget(self.highlight_row, 2)
             if w is not None:
                 row_cor = w.text().strip()
         bar_cor = self.cor_input.text().strip()
-        chosen_cor = row_cor or bar_cor
-        if chosen_cor and self.cor_method_box.currentText() != "auto":
-            # Mirror the chosen value into the top-bar so try_reconstruction()
-            # (which reads self.cor_input) uses the right starting guess.
-            self._cor_input_prev = bar_cor
-            self.cor_input.setText(chosen_cor)
+        seed = row_cor or bar_cor
+        if seed:
+            try:
+                float(seed)
+            except ValueError:
+                seed = ""
+        if seed:
             self.log_output.append(
-                f'🤖 AI Reco starting COR = <b>{chosen_cor}</b>  '
+                f'🤖 AI Reco seed COR = <b>{seed}</b> '
                 f'(source: {"row" if row_cor else "top-bar"})'
             )
+
+        # Wipe any stale center_of_rotation.txt so we only read this run's
+        # result. Tomocupy appends, so leftover values would confuse the
+        # last-line parse below.
+        data_folder = self.data_path.text().strip()
+        proj_name = os.path.splitext(os.path.basename(proj_file))[0]
+        try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
+        stale = os.path.join(try_dir, "center_of_rotation.txt")
+        if os.path.exists(stale):
+            try:
+                os.remove(stale)
+            except OSError:
+                pass
+
+        recon_way = self.recon_way_box.currentText()
+        gpu = str(self.cuda_box_try.value())
+        if self.use_conf_box.isChecked():
+            self.log_output.append("⚠️ You are using config file, only recon type, filename, rot axis from GUI")
+            config_text = self.config_editor_try.toPlainText()
+            if not config_text.strip():
+                self.log_output.append('<span style="color:red;">⚠️ no text in conf, stop</span>')
+                return
+            temp_try = os.path.join(self.data_path.text(), "temp_try.conf")
+            with open(temp_try, "w") as f:
+                f.write(config_text)
+            cmd = ["tomocupy", str(recon_way),
+                   "--reconstruction-type", "try",
+                   "--config", temp_try,
+                   "--file-name", proj_file,
+                   "--rotation-axis-auto", "auto"]
+            if seed:
+                cmd += ["--rotation-axis", seed]
+            cmd += self._ai_cor_args()
         else:
-            self._cor_input_prev = None
+            cmd = ["tomocupy", str(recon_way),
+                   "--reconstruction-type", "try",
+                   "--file-name", proj_file,
+                   "--rotation-axis-auto", "auto"]
+            if seed:
+                cmd += ["--rotation-axis", seed]
+            cmd += self._ai_cor_args()
+            cmd += self._gather_params_args()
+            cmd += self._gather_rings_args()
+            cmd += self._gather_bhard_args()
+            cmd += self._gather_phase_args()
+            cmd += self._gather_Geometry_args()
+            cmd += self._gather_Data_args()
+            cmd += self._gather_Performance_args()
+            temp_try = None
 
-        # Step 1: run regular try reconstruction (blocks until done)
-        ok = self.try_reconstruction()
-
-        # Step 2: locate the output TIFFs
-        proj_file = self.highlight_scan
-        if not proj_file:
-            return
-        data_folder = self.data_path.text().strip()
-        proj_name = os.path.splitext(os.path.basename(proj_file))[0]
-        try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
-        tiff_files = sorted(glob.glob(os.path.join(try_dir, "*.tiff")))
-        if not tiff_files:
-            self.log_output.append(f'<span style="color:red;">❌ No TIFFs in {try_dir}</span>')
-            return
-
-        # Step 3: load images and extract COR values from filenames
-        img_list = []
-        cor_list = []
-        for tiff in tiff_files:
-            m = re.search(r'center(\d+\.\d+)', os.path.basename(tiff))
-            if not m:
-                continue
-            cor_val = float(m.group(1))
-            arr = np.array(_PIL_Image.open(tiff)).astype(np.float32)
-            img_list.append(arr)
-            cor_list.append(cor_val)
-
-        if not img_list:
-            self.log_output.append('<span style="color:red;">❌ Could not parse COR values from TIFF filenames</span>')
-            return
-
-        img_cache = np.array(img_list)
-        center_of_rotation_cache = np.array(cor_list)
-
-        # Step 4: run inference
-        try:
-            from tomogui._tomocor_infer.inference import inference_pipeline
-        except ImportError as e:
-            self.log_output.append(f'<span style="color:red;">❌ Inference module error: {e}</span>')
-            return
-
-        ai_args = Namespace(
-            infer_use_8bits=True,
-            infer_downsample_factor=2,
-            infer_num_windows=3,
-            infer_seed_number=10,
-            infer_model_path=model_path,
-            infer_window_size=518,
-        )
-
-        self.log_output.append(f'🤖 Running AI inference on {len(img_list)} slices...')
+        self.log_output.append('🤖 Try + AI COR search (single tomocupy call)…')
         QApplication.processEvents()
-
         try:
-            inference_pipeline(ai_args, img_cache, center_of_rotation_cache, try_dir)
-            cor_txt = os.path.join(try_dir, 'center_of_rotation.txt')
-            if os.path.exists(cor_txt):
-                with open(cor_txt) as f:
-                    lines = [line.strip() for line in f if line.strip()]
-                if lines:
-                    ai_cor = lines[-1]
-                    float(ai_cor)  # validate
-                    self.cor_data[proj_file] = ai_cor
-                    self._save_cor_data(data_folder, self.cor_data)
-                    if self.highlight_row is not None:
-                        cor_widget = self.batch_file_main_table.cellWidget(self.highlight_row, 2)
-                        if cor_widget:
-                            cor_widget.setText(str(ai_cor))
-                    self.log_output.append(f'<span style="color:green;">✅ AI COR: {ai_cor} — saved for {os.path.basename(proj_file)}</span>')
-                    # Run full reconstruction with the AI-predicted COR
-                    self.log_output.append('🚀 Starting full reconstruction with AI COR...')
-                    QApplication.processEvents()
-                    return self.full_reconstruction()
-						
-                else:
-                    self.log_output.append('<span style="color:orange;">⚠️ center_of_rotation.txt is empty</span>')
-            else:
-                self.log_output.append(f'<span style="color:orange;">⚠️ Output not found: {cor_txt}</span>')
-        except Exception as e:
-            self.log_output.append(f'<span style="color:red;">❌ AI Reco error: {e}</span>')
+            code = self.run_command_live(
+                cmd, proj_file=proj_file, job_label="Try+AI recon",
+                wait=True, cuda_devices=gpu,
+            )
         finally:
-            # Restore the top-bar so a row-specific starting COR we borrowed
-            # earlier doesn't leak into later single-file clicks.
-            if getattr(self, "_cor_input_prev", None) is not None:
-                self.cor_input.setText(self._cor_input_prev)
-                self._cor_input_prev = None
+            if temp_try and os.path.exists(temp_try):
+                try:
+                    os.remove(temp_try)
+                except OSError:
+                    pass
 
-    def _run_ai_inference_for_file(self, proj_file, model_path=None):
-        """Run DINOv2 inference on the existing try-reconstruction TIFFs of
-        one file and write the predicted COR into the row + rot_cen.json.
-        Returns the predicted COR as a string on success, or None on failure.
-        Does NOT run try or full reconstruction — caller is responsible for
-        those (and must have run 'try' first so the TIFFs exist)."""
-        import re as _re
-        from argparse import Namespace as _NS
-        from PIL import Image as _PIL_Image
-        if model_path is None:
-            model_path = self.ai_model_path.text().strip()
-        if not model_path or not os.path.exists(model_path):
-            self.log_output.append('<span style="color:red;">❌ Invalid AI model path</span>')
-            return None
-        data_folder = self.data_path.text().strip()
-        proj_name = os.path.splitext(os.path.basename(proj_file))[0]
-        try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
-        tiff_files = sorted(glob.glob(os.path.join(try_dir, "*.tiff")))
-        if not tiff_files:
+        if code != 0:
             self.log_output.append(
-                f'<span style="color:red;">❌ No TIFFs for {os.path.basename(proj_file)} '
-                f'in {try_dir} — try reconstruction did not run</span>'
+                f'<span style="color:red;">❌ Try+AI failed for {os.path.basename(proj_file)}</span>'
             )
-            return None
-        img_list, cor_list = [], []
-        for tiff in tiff_files:
-            m = _re.search(r'center(\d+\.\d+)', os.path.basename(tiff))
-            if not m:
-                continue
-            cor_list.append(float(m.group(1)))
-            img_list.append(np.array(_PIL_Image.open(tiff)).astype(np.float32))
-        if not img_list:
-            self.log_output.append('<span style="color:red;">❌ Could not parse COR values</span>')
-            return None
-        try:
-            from tomogui._tomocor_infer.inference import inference_pipeline
-        except ImportError as e:
-            self.log_output.append(f'<span style="color:red;">❌ Inference module error: {e}</span>')
-            return None
-        ai_args = _NS(infer_use_8bits=True, infer_downsample_factor=2,
-                      infer_num_windows=3, infer_seed_number=10,
-                      infer_model_path=model_path, infer_window_size=518)
-        try:
-            inference_pipeline(ai_args, np.array(img_list), np.array(cor_list), try_dir)
-        except Exception as e:
+            return
+
+        ai_cor = self._read_ai_cor_from_try_dir(proj_file)
+        if ai_cor is None:
             self.log_output.append(
-                f'<span style="color:red;">❌ AI inference failed for '
-                f'{os.path.basename(proj_file)}: {e}</span>'
+                f'<span style="color:orange;">⚠️ tomocupy did not produce '
+                f'center_of_rotation.txt in {try_dir}</span>'
             )
-            return None
-        cor_txt = os.path.join(try_dir, 'center_of_rotation.txt')
-        if not os.path.exists(cor_txt):
-            return None
-        with open(cor_txt) as f:
-            lines = [line.strip() for line in f if line.strip()]
-        if not lines:
-            return None
-        ai_cor = lines[-1]
-        try:
-            float(ai_cor)
-        except ValueError:
-            return None
-        # Persist + reflect in the table
-        self.cor_data[proj_file] = ai_cor
+            return
+
+        ai_cor_str = f"{ai_cor:.2f}"
+        self.cor_data[proj_file] = ai_cor_str
         if data_folder:
             self._save_cor_data(data_folder, self.cor_data)
-        row = self._find_row_by_filepath(proj_file)
-        if row is not None:
-            w = self.batch_file_main_table.cellWidget(row, 2)
-            if w is not None:
-                w.setText(str(ai_cor))
-        return ai_cor
+        if self.highlight_row is not None:
+            cor_widget = self.batch_file_main_table.cellWidget(self.highlight_row, 2)
+            if cor_widget:
+                cor_widget.setText(ai_cor_str)
+        self.log_output.append(
+            f'<span style="color:green;">✅ AI COR: {ai_cor_str} — saved for '
+            f'{os.path.basename(proj_file)}</span>'
+        )
+
+        self.log_output.append('🚀 Starting full reconstruction with AI COR…')
+        QApplication.processEvents()
+        return self.full_reconstruction()
 
     # ------------------------------------------------------------------ #
     #  Sync Acquisition                                                    #
@@ -5472,12 +5451,8 @@ class TomoGUI(QWidget):
         where verticalImageSize is the number of rows in /exchange/data.
         """
         import math
-        import glob
-        import re as _re
         import shutil
-        from argparse import Namespace
         import numpy as np
-        from PIL import Image
         import h5py
 
         proj_file = self.highlight_scan
@@ -5529,14 +5504,17 @@ class TomoGUI(QWidget):
         )
         QApplication.processEvents()
 
-        # Build base tomocupy-try cmd; we'll swap --nsino per call.
+        # Build base tomocupy-try+AI cmd; we'll swap --nsino per call.
+        # Use tomocupy's built-in AI center finder so this is one subprocess
+        # per nsino instead of "run try, then run inference on the TIFFs".
         base_cmd = [
             "tomocupy", self.recon_way_box.currentText(),
             "--reconstruction-type", "try",
             "--file-name", proj_file,
-            "--rotation-axis-auto", "manual",
+            "--rotation-axis-auto", "auto",
             "--rotation-axis", str(seed),
         ]
+        base_cmd += self._ai_cor_args()
         base_cmd += self._gather_params_args()
         base_cmd += self._gather_rings_args()
         base_cmd += self._gather_bhard_args()
@@ -5558,15 +5536,13 @@ class TomoGUI(QWidget):
                 out.append(a)
             return out
 
-        _CENTER_RE = _re.compile(r'center(\d+\.\d+)')
-
         def _try_and_infer(nsino):
             # Clean slate for this nsino
             if os.path.isdir(try_dir):
                 shutil.rmtree(try_dir, ignore_errors=True)
             cmd = _strip_nsino(base_cmd) + ["--nsino", str(nsino)]
             self.log_output.append(
-                f'<span style="color:#00796b;">   → Try at nsino={nsino} …</span>'
+                f'<span style="color:#00796b;">   → Try + AI COR at nsino={nsino} …</span>'
             )
             QApplication.processEvents()
             code = self.run_command_live(
@@ -5575,48 +5551,14 @@ class TomoGUI(QWidget):
                 wait=True, cuda_devices=None
             )
             if code != 0:
-                raise RuntimeError(f"tomocupy try at nsino={nsino} failed (exit {code})")
+                raise RuntimeError(f"tomocupy try+AI at nsino={nsino} failed (exit {code})")
 
-            tiffs = sorted(glob.glob(os.path.join(try_dir, "*.tiff")))
-            imgs, cors = [], []
-            for t in tiffs:
-                m = _CENTER_RE.search(os.path.basename(t))
-                if not m:
-                    continue
-                cors.append(float(m.group(1)))
-                imgs.append(np.array(Image.open(t)).astype(np.float32))
-            if not imgs:
+            ai_cor = self._read_ai_cor_from_try_dir(proj_file)
+            if ai_cor is None:
                 raise RuntimeError(
-                    f"no parsable TIFFs produced at nsino={nsino}")
-
-            # Remove any stale center_of_rotation.txt so we only read the
-            # result of THIS inference call.
-            cor_txt = os.path.join(try_dir, "center_of_rotation.txt")
-            if os.path.exists(cor_txt):
-                os.remove(cor_txt)
-
-            from tomogui._tomocor_infer.inference import inference_pipeline
-            args = Namespace(
-                infer_use_8bits=True,
-                infer_downsample_factor=2,
-                infer_num_windows=3,
-                infer_seed_number=10,
-                infer_model_path=model_path,
-                infer_window_size=518,
-            )
-            self.log_output.append(
-                f'<span style="color:#00796b;">   → AI infer at nsino={nsino} …</span>'
-            )
-            QApplication.processEvents()
-            inference_pipeline(args, np.array(imgs), np.array(cors), try_dir)
-            if not os.path.exists(cor_txt):
-                raise RuntimeError(
-                    f"inference at nsino={nsino} produced no center_of_rotation.txt")
-            with open(cor_txt) as fh:
-                lines = [ln.strip() for ln in fh if ln.strip()]
-            if not lines:
-                raise RuntimeError(f"empty center_of_rotation.txt at nsino={nsino}")
-            return float(lines[-1].split()[-1])
+                    f"tomocupy at nsino={nsino} did not produce "
+                    f"center_of_rotation.txt")
+            return ai_cor
 
         try:
             cor1 = _try_and_infer(0.1)
@@ -6051,9 +5993,13 @@ class TomoGUI(QWidget):
         self._batch_active = True
         data_folder = self.data_path.text().strip()
         failed_inf = []      # set by Phase B (or left empty if skipped)
+        # Phase B (AI COR) now runs try + AI in a single tomocupy call, so a
+        # separate Phase A would just redo the try. Skip Phase A automatically
+        # whenever Phase B is on to avoid burning GPU time twice.
+        skip_try_for_ai = run_try and run_infer
         try:
             # ── Phase A: multi-GPU try reconstructions ───────────────
-            if run_try:
+            if run_try and not skip_try_for_ai:
                 self.log_output.append(
                     '<span style="color:#1a8cff;">── Phase A: TRY reconstructions '
                     '(parallel across GPUs)…</span>'
@@ -6061,16 +6007,21 @@ class TomoGUI(QWidget):
                 QApplication.processEvents()
                 self._run_batch_with_queue(selected_files, recon_type='try',
                                            num_gpus=num_gpus, machine=machine)
+            elif skip_try_for_ai:
+                self.log_output.append(
+                    '<span style="color:#888;">── Phase A (Try) skipped — '
+                    'Phase B (AI COR) will run try + inference in one call.</span>'
+                )
             else:
                 self.log_output.append(
                     '<span style="color:#888;">── Phase A (Try) skipped — '
                     'using existing try_center TIFFs.</span>'
                 )
 
-            # ── Phase B: DINOv2 inference (one file per GPU slot) ────
+            # ── Phase B: tomocupy try + AI COR (one file per GPU slot) ─
             if run_infer:
                 self.log_output.append(
-                    f'<span style="color:#1a8cff;">── Phase B: DINOv2 inference — '
+                    f'<span style="color:#1a8cff;">── Phase B: Try + AI COR — '
                     f'{len(selected_files)} file(s), {num_gpus} GPU slot(s)…</span>'
                 )
                 QApplication.processEvents()
@@ -6636,26 +6587,78 @@ class TomoGUI(QWidget):
         file_path = file_info['path']
         filename = os.path.basename(file_path)
 
-        # AI inference: one file per worker subprocess, driven by the same queue
-        # as Phase A/C so a single stuck file only blocks one GPU, not a whole
-        # chunk.
+        # AI COR: launch tomocupy in try mode with the built-in AI center
+        # finder. Tomocupy runs the try recon, executes the AI inference on
+        # the cached slices, and writes center_of_rotation.txt inside the
+        # try output dir. The batch collector reads that file to fill in the
+        # table + feed Full.
         if recon_type == 'infer':
-            import sys as _sys
-            data_folder = self.data_path.text().strip()
             model_path = self.ai_model_path.text().strip()
             if not model_path or not os.path.exists(model_path):
                 self.log_output.append(
                     f'<span style="color:red;">❌ AI model path invalid for {filename}</span>'
                 )
                 return None
-            cmd = [_sys.executable, "-m", "tomogui._infer_worker",
-                   data_folder, model_path, file_path]
+            data_folder = self.data_path.text().strip()
+            proj_name = os.path.splitext(filename)[0]
+            try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
+            stale = os.path.join(try_dir, "center_of_rotation.txt")
+            if os.path.exists(stale):
+                try:
+                    os.remove(stale)
+                except OSError:
+                    pass
+
+            # Per-file COR seed: row first, top-bar fallback (same policy
+            # as the try phase).
+            row_cor = ""
+            if file_info.get('cor_input') is not None:
+                try:
+                    row_cor = file_info['cor_input'].text().strip()
+                except Exception:
+                    row_cor = ""
+            seed = row_cor or self.cor_input.text().strip()
+            try:
+                float(seed)
+            except (ValueError, TypeError):
+                seed = ""
+
+            recon_way = self.recon_way_box.currentText()
+            if self.use_conf_box.isChecked():
+                config_text = self.config_editor_try.toPlainText()
+                temp_conf = os.path.join(self.data_path.text(),
+                                         f"temp_infer_gpu{gpu_id}.conf")
+                with open(temp_conf, "w") as f:
+                    f.write(config_text)
+                cmd = ["tomocupy", str(recon_way),
+                       "--reconstruction-type", "try",
+                       "--config", temp_conf,
+                       "--file-name", file_path,
+                       "--rotation-axis-auto", "auto"]
+                if seed:
+                    cmd += ["--rotation-axis", seed]
+                cmd += self._ai_cor_args()
+            else:
+                cmd = ["tomocupy", str(recon_way),
+                       "--reconstruction-type", "try",
+                       "--file-name", file_path,
+                       "--rotation-axis-auto", "auto"]
+                if seed:
+                    cmd += ["--rotation-axis", seed]
+                cmd += self._ai_cor_args()
+                cmd += self._gather_params_args()
+                cmd += self._gather_rings_args()
+                cmd += self._gather_bhard_args()
+                cmd += self._gather_phase_args()
+                cmd += self._gather_Geometry_args()
+                cmd += self._gather_Data_args()
+                cmd += self._gather_Performance_args()
+
             cmd = self._get_batch_machine_command(cmd, machine)
             p = QProcess(self)
             p.setProcessChannelMode(QProcess.SeparateChannels)
             p.readyReadStandardOutput.connect(
-                lambda proc=p, fn=filename, fi=file_info:
-                    self._on_infer_output(proc, fn, fi)
+                lambda proc=p, fn=filename: self._on_process_output(proc, fn, is_error=False)
             )
             p.readyReadStandardError.connect(
                 lambda proc=p, fn=filename: self._on_process_output(proc, fn, is_error=True)
@@ -6667,11 +6670,11 @@ class TomoGUI(QWidget):
             p.start(str(cmd[0]), [str(a) for a in cmd[1:]])
             if not p.waitForStarted(5000):
                 self.log_output.append(
-                    f'<span style="color:red;">❌ Inference worker failed to start for {filename}</span>'
+                    f'<span style="color:red;">❌ AI COR job failed to start for {filename}</span>'
                 )
                 return None
             self.log_output.append(
-                f'<span style="color:blue;">🤖 GPU {gpu_id} inference start: {filename} '
+                f'<span style="color:blue;">🤖 GPU {gpu_id} Try+AI-COR start: {filename} '
                 f'(PID {p.processId()})</span>'
             )
             return p
@@ -6946,22 +6949,6 @@ class TomoGUI(QWidget):
             )
         QApplication.processEvents()
         return True
-
-    def _on_infer_output(self, process, filename, file_info):
-        """Pipe inference worker stdout into the log. The actual COR cell
-        write is done once at the end of Phase B, not here — keeps the
-        update path singular and avoids widget-race bugs."""
-        data = bytes(process.readAllStandardOutput()).decode(errors="ignore")
-        if not data.strip():
-            return
-        basename = os.path.basename(filename)
-        for line in data.strip().split('\n'):
-            line = line.strip()
-            if line:
-                self.log_output.append(
-                    f'<span style="color:gray;">▸ [{basename}] {line}</span>'
-                )
-
 
     # ===== THEME METHODS =====
 
