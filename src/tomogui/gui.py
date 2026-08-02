@@ -1,4 +1,10 @@
 import os, glob, json
+
+# HDF5 file locking on NFS is broken (returns EAGAIN even when nothing holds
+# the file). Disable it globally in this process AND its subprocesses BEFORE
+# any h5py import can pick up the default. Every subsequent QProcess inherits
+# this via os.environ.
+os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 import numpy as np
 
 # Disable vsync for better remote performance
@@ -3587,6 +3593,12 @@ class TomoGUI(QWidget):
             job_label = "job"
         name = f"{job_label}-{scan_id}" if scan_id else job_label
 
+        # Wrap with `env HDF5_USE_FILE_LOCKING=FALSE` so it's set at the shell
+        # level too — QProcessEnvironment.systemEnvironment().insert has been
+        # observed to be swallowed on some Linux/PyQt combos. Belt-and-braces.
+        if cmd and cmd[0] != "env":
+            cmd = ["env", "HDF5_USE_FILE_LOCKING=FALSE"] + list(cmd)
+
         cli_str = " ".join(map(str, cmd))
         self.log_output.append(f'\U0001f680 [{name}] start: {cli_str}')
         QApplication.processEvents()
@@ -7172,6 +7184,8 @@ class TomoGUI(QWidget):
                 env.insert("CUDA_VISIBLE_DEVICES", str(gpu_id))
                 env.insert("HDF5_USE_FILE_LOCKING", "FALSE")
                 p.setProcessEnvironment(env)
+            if cmd and cmd[0] != "env":
+                cmd = ["env", "HDF5_USE_FILE_LOCKING=FALSE"] + list(cmd)
             p.start(str(cmd[0]), [str(a) for a in cmd[1:]])
             if not p.waitForStarted(5000):
                 self.log_output.append(
@@ -7334,6 +7348,11 @@ class TomoGUI(QWidget):
             env.insert("CUDA_VISIBLE_DEVICES", str(gpu_id))
             env.insert("HDF5_USE_FILE_LOCKING", "FALSE")
             p.setProcessEnvironment(env)
+
+        # Also wrap with `env HDF5_USE_FILE_LOCKING=FALSE` at the shell level
+        # in case the QProcess environment insert gets dropped somewhere.
+        if cmd and cmd[0] != "env":
+            cmd = ["env", "HDF5_USE_FILE_LOCKING=FALSE"] + list(cmd)
 
         # Start process
         p.start(str(cmd[0]), [str(a) for a in cmd[1:]])
