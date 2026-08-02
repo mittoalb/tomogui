@@ -1164,14 +1164,25 @@ class TomoGUI(QWidget):
         Tomocupy runs the try recon and the AI center search in a single
         subprocess and writes ``center_of_rotation.txt`` inside the try
         output directory (``{data}_rec/try_center/{proj}/``).
+
+        The model-path flag depends on the search method:
+          * ``fine`` → ``--infer-model-path`` (used by ``inference_pipeline``)
+          * ``full`` → ``--bin-infer-model-path`` (used by
+            ``bin_inference_pipeline``, two-stage bin search)
+
+        Passing the wrong one is silently ignored by tomocupy, so we route
+        the model path to whichever pipeline the chosen method actually
+        reads.
         """
         model_path = self.ai_model_path.text().strip()
         if not model_path or not os.path.exists(model_path):
             return []
+        model_flag = ("--bin-infer-model-path" if ai_search_method == "full"
+                      else "--infer-model-path")
         return [
             "--rotation-axis-method", "ai",
             "--ai-search-method", ai_search_method,
-            "--bin-infer-model-path", model_path,
+            model_flag, model_path,
         ]
 
     def _read_ai_cor_from_try_dir(self, proj_file):
