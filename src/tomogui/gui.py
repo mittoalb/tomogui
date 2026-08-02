@@ -250,7 +250,13 @@ class TomoGUI(QWidget):
         self.vmin = None
         self.vmax = None
         self.preview_files = []
+        # self.full_files holds either a list of TIFF paths (legacy tiff
+        # output) or a list of integer slice indices into an H5 volume.
+        # self.full_h5 is the open h5py handle when we're viewing an H5
+        # reconstruction; None for TIFF mode.
         self.full_files = []
+        self.full_h5 = None
+        self.full_h5_path = None
         self.process = []
         self._current_img = None
         self._current_img_path = None
@@ -2377,12 +2383,17 @@ class TomoGUI(QWidget):
             self._pg_apply_levels(self.vmin, self.vmax)
 
     def refresh_current_image(self):
-        if self.full_files and 0 <= self.slice_slider.value() < len(self.full_files):
-            self.show_image(self.full_files[self.slice_slider.value()], flag=None)
-        elif self.preview_files and 0 <= self.slice_slider.value() < len(self.preview_files):
-            self.show_image(self.preview_files[self.slice_slider.value()], flag=None)
-        elif 0<= self.slice_slider.value() < self.raw_files_num:
-            self.show_image(img_path=self.slice_slider.value(), flag="raw")
+        idx = self.slice_slider.value()
+        if self.full_files and 0 <= idx < len(self.full_files):
+            entry = self.full_files[idx]
+            if self.full_h5 is not None:
+                self.show_image(int(entry), flag="full_h5")
+            else:
+                self.show_image(entry, flag=None)
+        elif self.preview_files and 0 <= idx < len(self.preview_files):
+            self.show_image(self.preview_files[idx], flag=None)
+        elif 0 <= idx < self.raw_files_num:
+            self.show_image(img_path=idx, flag="raw")
 
     def highlight_editor(self, editor, event):
         editor.setStyleSheet("QTextEdit { border: 2px solid green; font-size: 12.5pt; }")
@@ -2510,16 +2521,17 @@ class TomoGUI(QWidget):
             #check recon status
             proj_name = os.path.splitext(filename)[0]
             try_dir = os.path.join(f"{table_folder}_rec", "try_center", proj_name)
-            full_dir = os.path.join(f"{table_folder}_rec", f"{proj_name}_rec")
             has_try = os.path.isdir(try_dir) and len(glob.glob(os.path.join(try_dir, "*.tiff"))) > 0
-            has_full = os.path.isdir(full_dir) and len(glob.glob(os.path.join(full_dir, "*.tiff"))) > 0
+            full_info = self._resolve_full_recon(table_folder, proj_name)
+            has_full = full_info['kind'] is not None
             # Determine row color based on reconstruction status
             if has_full:
                 row_color = "green"  # Full reconstruction exists
-                fp = glob.glob(os.path.join(full_dir, "*.tiff"))
-                num_1 = int(Path(fp[0]).stem.split("_")[-1])
-                num_2 = int(Path(fp[-1]).stem.split("_")[-1])
-                status_item = QTableWidgetItem(f"Full {num_1}-{num_2}")
+                if full_info['range'] is not None:
+                    num_1, num_2 = full_info['range']
+                    status_item = QTableWidgetItem(f"Full {num_1}-{num_2}")
+                else:
+                    status_item = QTableWidgetItem(f"Full ({full_info['kind']})")
             elif has_try:
                 row_color = "orange"  # Only try reconstruction exists
                 status_item = QTableWidgetItem("Done try")
@@ -2904,30 +2916,80 @@ class TomoGUI(QWidget):
         except Exception:
             pass
 
+    def _resolve_full_recon(self, data_folder, proj_name):
+        """Locate the full reconstruction for one dataset.
+
+        Tomocupy's default output is a single ``.h5`` file
+        (``{data}_rec/{proj}_rec.h5``, with the volume at ``/exchange/data``).
+        Legacy TIFF output lives at ``{data}_rec/{proj}_rec/*.tiff``.
+
+        Returns a dict::
+
+            {'kind': 'h5' | 'tiff' | None,
+             'h5_path': str | None,
+             'tiff_files': list[str],
+             'n_slices': int,
+             'range': (first, last) | None}
+
+        The dict is always populated; missing pieces are None / [] / 0. If
+        both TIFF and H5 exist we prefer H5 (that's the new default).
+        """
+        result = {'kind': None, 'h5_path': None, 'tiff_files': [],
+                  'n_slices': 0, 'range': None}
+        if not data_folder or not proj_name:
+            return result
+        base = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec")
+        h5_path = f"{base}.h5"
+        if os.path.isfile(h5_path):
+            try:
+                with h5py.File(h5_path, 'r') as fh:
+                    n = int(fh['/exchange/data'].shape[0])
+                result.update(kind='h5', h5_path=h5_path,
+                              n_slices=n, range=(0, max(0, n - 1)))
+                return result
+            except (OSError, KeyError):
+                pass
+        if os.path.isdir(base):
+            tiffs = sorted(glob.glob(os.path.join(base, "*.tiff")))
+            if tiffs:
+                try:
+                    n1 = int(Path(tiffs[0]).stem.split("_")[-1])
+                    n2 = int(Path(tiffs[-1]).stem.split("_")[-1])
+                except (ValueError, IndexError):
+                    n1, n2 = 0, len(tiffs) - 1
+                result.update(kind='tiff', tiff_files=tiffs,
+                              n_slices=len(tiffs), range=(n1, n2))
+        return result
+
     def _auto_contrast_for_file(self, proj_file, lo_pct=5, hi_pct=95):
         """Compute (vmin, vmax) as formatted strings from the 5–95 % percentile
         of a representative slice of the reconstructed volume. Returns
-        (None, None) if no TIFFs are available.
+        (None, None) if no reconstruction is available.
 
-        Prefers the full reconstruction (`{data}_rec/{proj}_rec/*.tiff`) —
-        that's what tomolog uploads. Falls back to the try-center TIFFs if
-        full is not available.
+        Prefers the full reconstruction (H5 first, then legacy TIFF dir) —
+        that's what tomolog uploads. Falls back to the try-center TIFFs
+        if full is not available.
         """
         data_folder = self.data_path.text().strip()
         if not data_folder:
             return (None, None)
         proj_name = os.path.splitext(os.path.basename(proj_file))[0]
-        full_dir = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec")
-        tiffs = sorted(glob.glob(os.path.join(full_dir, "*.tiff")))
-        if not tiffs:
-            try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
-            tiffs = sorted(glob.glob(os.path.join(try_dir, "*.tiff")))
-        if not tiffs:
-            return (None, None)
-        # Take the middle slice as representative
-        mid_path = tiffs[len(tiffs) // 2]
         try:
-            arr = np.array(Image.open(mid_path)).astype(np.float32)
+            info = self._resolve_full_recon(data_folder, proj_name)
+            if info['kind'] == 'h5':
+                with h5py.File(info['h5_path'], 'r') as fh:
+                    dset = fh['/exchange/data']
+                    mid = dset.shape[0] // 2
+                    arr = np.asarray(dset[mid], dtype=np.float32)
+            elif info['kind'] == 'tiff':
+                mid_path = info['tiff_files'][len(info['tiff_files']) // 2]
+                arr = np.array(Image.open(mid_path)).astype(np.float32)
+            else:
+                try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
+                tiffs = sorted(glob.glob(os.path.join(try_dir, "*.tiff")))
+                if not tiffs:
+                    return (None, None)
+                arr = np.array(Image.open(tiffs[len(tiffs) // 2])).astype(np.float32)
             lo = float(np.percentile(arr, lo_pct))
             hi = float(np.percentile(arr, hi_pct))
             if hi <= lo:
@@ -3704,19 +3766,20 @@ class TomoGUI(QWidget):
         filename = os.path.basename(filepath)
         proj_name = os.path.splitext(filename)[0]
         try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
-        full_dir = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec")
         has_try = os.path.isdir(try_dir) and len(glob.glob(os.path.join(try_dir, "*.tiff"))) > 0
-        has_full = os.path.isdir(full_dir) and len(glob.glob(os.path.join(full_dir, "*.tiff"))) > 0
+        full_info = self._resolve_full_recon(data_folder, proj_name)
+        has_full = full_info['kind'] is not None
 
         row = 0  # insert at top (newest first)
         self.batch_file_main_table.insertRow(row)
 
         if has_full:
             row_color, status_text = "green", "Full"
-            fp = glob.glob(os.path.join(full_dir, "*.tiff"))
-            num_1 = int(Path(fp[0]).stem.split("_")[-1])
-            num_2 = int(Path(fp[-1]).stem.split("_")[-1])
-            status_item = QTableWidgetItem(f"{status_text} {num_1}-{num_2}")
+            if full_info['range'] is not None:
+                num_1, num_2 = full_info['range']
+                status_item = QTableWidgetItem(f"{status_text} {num_1}-{num_2}")
+            else:
+                status_item = QTableWidgetItem(f"{status_text} ({full_info['kind']})")
         elif has_try:
             row_color, status_text = "orange", "Done try"
             status_item = QTableWidgetItem(status_text)
@@ -3973,13 +4036,16 @@ class TomoGUI(QWidget):
             code = self.run_command_live(cmd, proj_file=proj_file, job_label="Full recon", wait=True, cuda_devices=gpu)
             try:
                 if code == 0:
-                    fullpath = os.path.join(f"{self.data_path.text()}_rec", f"{pn}_rec")
-                    full_files = glob.glob(os.path.join(fullpath, "*.tiff"))
-                    num_1 = int(Path(full_files[0]).stem.split("_")[-1])
-                    num_2 = int(Path(full_files[-1]).stem.split("_")[-1])
-                    self._update_row(row=self.highlight_row, color='green', status=f'Full {num_1}-{num_2}')
+                    info = self._resolve_full_recon(self.data_path.text(), pn)
+                    if info['kind'] and info['range'] is not None:
+                        n1, n2 = info['range']
+                        status = f"Full {n1}-{n2}"
+                    elif info['kind']:
+                        status = f"Full ({info['kind']})"
+                    else:
+                        status = "Done full"
+                    self._update_row(row=self.highlight_row, color='green', status=status)
                     self.log_output.append(f'<span style="color:green;">\u2705 Done full recon {proj_file}</span>')
-                    del fullpath, full_files, num_1, num_2, pn
                     return True
                 else:
                     self.log_output.append(f'<span style="color:red;">\u274c Full recon {proj_file} failed</span>')
@@ -4153,25 +4219,62 @@ class TomoGUI(QWidget):
         data_folder = self.data_path.text().strip()
         proj_file = self.highlight_scan
         proj_name = os.path.splitext(os.path.basename(proj_file))[0]
-        full_dir = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec")
-        self.full_files = sorted(glob.glob(os.path.join(full_dir, "*.tiff")))
-        if not self.full_files:
-            self.log_output.append(f'<span style="color:red;">\u274c No full reconstruction found in {full_dir}</span>')
+        info = self._resolve_full_recon(data_folder, proj_name)
+
+        # Close any previously-open H5 handle before switching source.
+        self._close_full_h5()
+
+        if info['kind'] == 'h5':
+            try:
+                self.full_h5 = h5py.File(info['h5_path'], 'r')
+            except OSError as e:
+                self.log_output.append(
+                    f'<span style="color:red;">\u274c Could not open '
+                    f'{info["h5_path"]}: {e}</span>'
+                )
+                return
+            self.full_h5_path = info['h5_path']
+            n = info['n_slices']
+            # full_files carries slice indices when we're in H5 mode.
+            self.full_files = list(range(n))
+            self.log_output.append(
+                f'\ud83d\udce6 Full recon: {os.path.basename(info["h5_path"])} '
+                f'({n} slices)'
+            )
+        elif info['kind'] == 'tiff':
+            self.full_files = info['tiff_files']
+            self.log_output.append(
+                f"first: {self.full_files[0]}; last: {self.full_files[-1]}"
+            )
+        else:
+            base = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec")
+            self.log_output.append(
+                f'<span style="color:red;">\u274c No full reconstruction found '
+                f'at {base}[.h5] or {base}/*.tiff</span>'
+            )
             return
-        self.log_output.append(f"first: {self.full_files[0]}; last: {self.full_files[-1]}")
+
         self._clear_roi()
         self._reset_view_state()
-        #self.set_image_scale(self.full_files[0])
         try:
             self.slice_slider.valueChanged.disconnect()
         except TypeError:
             pass
-        self.slice_slider.setMaximum(len(self.full_files) - 1)
+        self.slice_slider.setMaximum(max(0, len(self.full_files) - 1))
         self.slice_slider.valueChanged.connect(self.update_full_slice)
-        # Store the source filename for display
         self._current_source_file = os.path.basename(proj_file)
         self._current_view_mode = "full"
         self.update_full_slice()
+
+    def _close_full_h5(self):
+        """Close any open full-recon H5 handle. Safe to call repeatedly."""
+        if self.full_h5 is not None:
+            try:
+                self.full_h5.close()
+            except OSError:
+                pass
+        self.full_h5 = None
+        self.full_h5_path = None
 
     def set_image_scale(self, img_path, flag=None):
         if flag == "raw":
@@ -4449,34 +4552,48 @@ class TomoGUI(QWidget):
     def update_full_slice(self):
         idx = self.slice_slider.value()
         self._remember_view()
-        if 0 <= idx < len(self.full_files):
-            path = self.full_files[idx]
-            self.show_image(path, flag=None)
-            self.filename_label.setText(os.path.basename(path))
+        if not (0 <= idx < len(self.full_files)):
+            return
+        entry = self.full_files[idx]
+        if self.full_h5 is not None:
+            # H5 mode: entry is a slice index.
+            self.show_image(int(entry), flag="full_h5")
+            self.filename_label.setText(
+                f"{os.path.basename(self.full_h5_path)} [slice {entry}]"
+            )
+        else:
+            self.show_image(entry, flag=None)
+            self.filename_label.setText(os.path.basename(entry))
         
 
-    def _safe_open_image(self, path, flag=None, retries=3): 
-        #add flag to seperate raw, recon
+    def _safe_open_image(self, path, flag=None, retries=3):
+        # flag values: None → TIFF path, "raw" → projection index into raw H5,
+        # "full_h5" → slice index into the open full-recon H5.
         for _ in range(retries):
             try:
                 if flag == "raw":
-                    return self._raw_h5['/exchange/data'][path,:,:]
-                else:
-                    with Image.open(path) as im:
-                        return np.array(im)
-            except Exception:
+                    return self._raw_h5['/exchange/data'][path, :, :]
+                if flag == "full_h5":
+                    return self.full_h5['/exchange/data'][int(path), :, :]
+                with Image.open(path) as im:
+                    return np.array(im)
+            except (OSError, KeyError):
                 QApplication.processEvents()
         if flag == "raw":
-            return self._raw_h5['/exchange/data'][path,:,:]
-        else:
-            with Image.open(path) as im:
-                return np.array(im)
+            return self._raw_h5['/exchange/data'][path, :, :]
+        if flag == "full_h5":
+            return self.full_h5['/exchange/data'][int(path), :, :]
+        with Image.open(path) as im:
+            return np.array(im)
 
     def show_image(self, img_path, flag=None):
-        #Flag arg to seperate prj and recon 
+        # flag: None → TIFF path; "raw" → raw projection index (dark/flat
+        # corrected inline); "full_h5" → slice index into self.full_h5.
         if flag == "raw":
-            img = self._raw_h5['/exchange/data'][img_path,:,:] #for raw projections, it takes img_path as idx
-            img = (img - self.dark)/(self.flat - self.dark)
+            img = self._raw_h5['/exchange/data'][img_path, :, :]
+            img = (img - self.dark) / (self.flat - self.dark)
+        elif flag == "full_h5":
+            img = self._safe_open_image(img_path, flag="full_h5")
         else:
             img = self._safe_open_image(img_path)
             if img.ndim == 3:
@@ -4841,10 +4958,9 @@ class TomoGUI(QWidget):
             filename = file_info['filename']
             proj_name = os.path.splitext(filename)[0]
             try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
-            full_dir = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec")
 
             has_try = os.path.isdir(try_dir) and len(glob.glob(os.path.join(try_dir, "*.tiff"))) > 0
-            has_full = os.path.isdir(full_dir) and len(glob.glob(os.path.join(full_dir, "*.tiff"))) > 0
+            has_full = self._resolve_full_recon(data_folder, proj_name)['kind'] is not None
 
             # Determine new color
             if has_full:
@@ -6245,32 +6361,24 @@ class TomoGUI(QWidget):
 
   #=========helper to update table based on filename========================
     def _get_full_recon_status(self, file_path):
-        """
-        Check the full reconstruction output directory and return status with slice range.
-        Returns: (status_text, status_color)
+        """Return (status_text, status_color) for the full reconstruction of
+        ``file_path``. Handles the tomocupy default H5 output as well as the
+        legacy TIFF directory.
         """
         try:
             table_folder = self.data_path.text()
             if not table_folder:
                 return "Done full", "green"
-
             filename = os.path.basename(file_path)
             proj_name = os.path.splitext(filename)[0]
-            full_dir = os.path.join(f"{table_folder}_rec", f"{proj_name}_rec")
-
-            # Check if output directory exists and has TIFF files
-            if os.path.isdir(full_dir):
-                tiff_files = sorted(glob.glob(os.path.join(full_dir, "*.tiff")))
-                if len(tiff_files) > 0:
-                    # Get slice numbers from first and last file
-                    num_1 = int(Path(tiff_files[0]).stem.split("_")[-1])
-                    num_2 = int(Path(tiff_files[-1]).stem.split("_")[-1])
-                    return f"Full {num_1}-{num_2}", "green"
-
-            # Fallback if directory doesn't exist or no files found
+            info = self._resolve_full_recon(table_folder, proj_name)
+            if info['kind'] and info['range'] is not None:
+                n1, n2 = info['range']
+                return f"Full {n1}-{n2}", "green"
+            if info['kind']:
+                return f"Full ({info['kind']})", "green"
             return "Done full", "green"
-        except Exception as e:
-            # If anything goes wrong, just return basic status
+        except Exception:
             return "Done full", "green"
 
     def _set_status_by_filename(self, filename, text, status_col=3, filename_col=1, color=None):
