@@ -4557,6 +4557,47 @@ class TomoGUI(QWidget):
         self.full_h5 = None
         self.full_h5_path = None
 
+    def _blank_viewer(self):
+        """Clear the on-screen image and drop every reference to the file
+        it was loaded from. Called before a Full recon so the display can't
+        keep an NFS handle alive on the file tomocupy is about to overwrite.
+        """
+        # Drop file-list state so slider handlers can't try to reopen the
+        # old paths after we've torn everything down.
+        self.full_files = []
+        self.preview_files = []
+        self._current_img = None
+        self._current_img_path = None
+        try:
+            self.slice_slider.valueChanged.disconnect()
+        except TypeError:
+            pass
+        self.slice_slider.setMaximum(0)
+        self.slice_slider.setValue(0)
+        try:
+            self.filename_label.setText("")
+        except (AttributeError, RuntimeError):
+            pass
+        self._clear_roi()
+        self._reset_view_state()
+
+        # Replace the pixels with an empty 1×1 array so the widget shows
+        # blank instead of the last frame from the file we're about to
+        # overwrite. Guarded because either renderer may be unavailable.
+        blank = np.zeros((1, 1), dtype=np.float32)
+        if VISPY_AVAILABLE and hasattr(self, 'image_visual'):
+            try:
+                self.image_visual.set_data(blank)
+                self.canvas.update()
+            except (ValueError, RuntimeError, AttributeError):
+                pass
+        elif hasattr(self, '_pg_image_item'):
+            try:
+                self._pg_image_item.setImage(blank, autoLevels=False)
+                self._pg_image_item.update()
+            except (ValueError, TypeError, RuntimeError, AttributeError):
+                pass
+
     def _release_full_h5_for_write(self, proj_file):
         """Prepare the full-recon output slot for a new tomocupy write.
 
@@ -4566,15 +4607,18 @@ class TomoGUI(QWidget):
         ``_parts/`` sidecar so tomocupy's ``h5py.File(..., "w")`` starts
         clean (tomocupy's own ``--clear-folder`` step runs ``rm {base}/*``
         which is a no-op when the output is a file rather than a dir)."""
-        # Step 1: unconditionally drop any viewer handle. If we later realise
-        # the user wanted to keep viewing something unrelated, they can just
-        # click View Full again — reopening is instant.
-        if self.full_h5 is not None:
+        # Step 1: blank the on-screen image and drop every reference to
+        # the file it was loaded from. This clears the H5 handle, forgets
+        # slice paths, and paints a 1×1 empty frame so nothing in the GUI
+        # can keep an NFS lock alive on the file tomocupy is about to
+        # overwrite. Reopening after the recon is a single click.
+        was_holding = self.full_h5 is not None or bool(self.full_files) or bool(self.preview_files)
+        self._blank_viewer()
+        if was_holding:
             self.log_output.append(
-                '<span style="color:#888;">🔓 Closed viewer H5 handle '
-                'before Full recon.</span>'
+                '<span style="color:#888;">🔓 Cleared viewer before '
+                'Full recon.</span>'
             )
-            self._close_full_h5()
 
         if not proj_file:
             return
