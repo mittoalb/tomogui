@@ -3806,6 +3806,12 @@ class TomoGUI(QWidget):
         if not proj_file:
             self.log_output.append("❌ No file")
             return
+        # Blank the viewer FIRST so nothing in the GUI keeps an NFS handle
+        # on the H5 tomocupy is about to overwrite in the Full stage.
+        self._blank_viewer()
+        QApplication.processEvents()
+        self._release_full_h5_for_write(proj_file)
+        QApplication.processEvents()
         self._persist_params_for_files([proj_file])
 
         model_path = self.ai_model_path.text().strip()
@@ -4249,13 +4255,19 @@ class TomoGUI(QWidget):
             self.full_btn.setEnabled(True)
 
     def full_reconstruction(self):
-        self._update_full_btn_state()
+        # STEP 1 (must be first, before anything else): blank the viewer
+        # and flush the paint so the on-screen image is *visibly* gone
+        # before we touch the H5 or launch tomocupy. Otherwise the display
+        # keeps an NFS handle alive on the file we're about to overwrite.
         proj_file = self.highlight_scan
+        self._blank_viewer()
+        QApplication.processEvents()
+        self._release_full_h5_for_write(proj_file)
+        QApplication.processEvents()
+
+        self._update_full_btn_state()
         if proj_file:
             self._persist_params_for_files([proj_file])
-        # Release any viewer handle on this file's H5 output so tomocupy
-        # can overwrite it — h5py write mode fails if a reader is still open.
-        self._release_full_h5_for_write(proj_file)
         # Mark this file as running locally and grey out button only for it
         self._running_full_file = proj_file
         self._update_full_btn_state()
