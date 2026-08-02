@@ -1156,6 +1156,37 @@ class TomoGUI(QWidget):
 
         self.tabs.addTab(params_tab, "Reconstruction")
 
+    def _strip_flag(self, cmd, flag):
+        """Remove every ``flag`` (and its value if the flag takes one) from
+        ``cmd``. Returns a new list. Used to drop stale flag values that
+        would otherwise shadow the AI-COR overrides we append later — argparse
+        keeps the *last* occurrence, so any conflicting later value silently
+        wins."""
+        out = []
+        skip = False
+        for a in cmd:
+            if skip:
+                skip = False
+                continue
+            if a == flag:
+                skip = True
+                continue
+            out.append(a)
+        return out
+
+    def _apply_ai_cor(self, cmd, ai_search_method="fine"):
+        """Return ``cmd`` with the AI-COR flags applied *last*, and with any
+        stale ``--rotation-axis-*`` / ``--ai-search-method`` / model-path
+        entries the caller may have already appended stripped out first, so
+        the AI values are what argparse sees."""
+        ai_flags = self._ai_cor_args(ai_search_method)
+        if not ai_flags:
+            return cmd
+        for flag in ("--rotation-axis-method", "--ai-search-method",
+                     "--infer-model-path", "--bin-infer-model-path"):
+            cmd = self._strip_flag(cmd, flag)
+        return cmd + ai_flags
+
     def _ai_cor_args(self, ai_search_method="fine"):
         """Return tomocupy CLI flags that turn on its built-in AI COR finder
         for a `try` reconstruction. Returns [] when the AI model path is not
@@ -3606,7 +3637,6 @@ class TomoGUI(QWidget):
                    "--rotation-axis-auto", "auto"]
             if seed:
                 cmd += ["--rotation-axis", seed]
-            cmd += self._ai_cor_args()
         else:
             cmd = ["tomocupy", str(recon_way),
                    "--reconstruction-type", "try",
@@ -3614,7 +3644,6 @@ class TomoGUI(QWidget):
                    "--rotation-axis-auto", "auto"]
             if seed:
                 cmd += ["--rotation-axis", seed]
-            cmd += self._ai_cor_args()
             cmd += self._gather_params_args()
             cmd += self._gather_rings_args()
             cmd += self._gather_bhard_args()
@@ -3623,6 +3652,10 @@ class TomoGUI(QWidget):
             cmd += self._gather_Data_args()
             cmd += self._gather_Performance_args()
             temp_try = None
+
+        # Apply AI-COR flags LAST so they win the argparse last-wins race
+        # against any --rotation-axis-method the Reconstruction tab emitted.
+        cmd = self._apply_ai_cor(cmd)
 
         self.log_output.append('🤖 Try + AI COR search (single tomocupy call)…')
         QApplication.processEvents()
@@ -5641,7 +5674,6 @@ class TomoGUI(QWidget):
             "--rotation-axis-auto", "auto",
             "--rotation-axis", str(seed),
         ]
-        base_cmd += self._ai_cor_args()
         base_cmd += self._gather_params_args()
         base_cmd += self._gather_rings_args()
         base_cmd += self._gather_bhard_args()
@@ -5649,6 +5681,9 @@ class TomoGUI(QWidget):
         base_cmd += self._gather_Geometry_args()
         base_cmd += self._gather_Data_args()
         base_cmd += self._gather_Performance_args()
+        # AI-COR flags win argparse's last-wins tie-break against any
+        # --rotation-axis-method emitted by the Reconstruction tab.
+        base_cmd = self._apply_ai_cor(base_cmd)
 
         def _strip_nsino(cmd):
             out = []
@@ -6756,7 +6791,6 @@ class TomoGUI(QWidget):
                        "--rotation-axis-auto", "auto"]
                 if seed:
                     cmd += ["--rotation-axis", seed]
-                cmd += self._ai_cor_args()
             else:
                 cmd = ["tomocupy", str(recon_way),
                        "--reconstruction-type", "try",
@@ -6764,7 +6798,6 @@ class TomoGUI(QWidget):
                        "--rotation-axis-auto", "auto"]
                 if seed:
                     cmd += ["--rotation-axis", seed]
-                cmd += self._ai_cor_args()
                 cmd += self._gather_params_args()
                 cmd += self._gather_rings_args()
                 cmd += self._gather_bhard_args()
@@ -6772,6 +6805,11 @@ class TomoGUI(QWidget):
                 cmd += self._gather_Geometry_args()
                 cmd += self._gather_Data_args()
                 cmd += self._gather_Performance_args()
+
+            # AI flags must be applied AFTER params so they win argparse's
+            # last-value-wins tie-break (otherwise --rotation-axis-method
+            # from the Reconstruction tab would silently override "ai").
+            cmd = self._apply_ai_cor(cmd)
 
             cmd = self._get_batch_machine_command(cmd, machine)
             p = QProcess(self)
