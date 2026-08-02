@@ -4623,60 +4623,19 @@ class TomoGUI(QWidget):
                 pass
 
     def _release_full_h5_for_write(self, proj_file):
-        """Prepare the full-recon output slot for a new tomocupy write.
+        """Blank the viewer and drop any H5 handle it holds so tomocupy can
+        overwrite the file without colliding with the GUI's reader.
 
-        Always closes any H5 the viewer currently has open — a mismatched
-        path is cheap to reopen, but a missed one leaves an NFS lock that
-        kills the recon. Then removes the target ``{proj}_rec.h5`` and its
-        ``_parts/`` sidecar so tomocupy's ``h5py.File(..., "w")`` starts
-        clean (tomocupy's own ``--clear-folder`` step runs ``rm {base}/*``
-        which is a no-op when the output is a file rather than a dir)."""
-        # Step 1: blank the on-screen image and drop every reference to
-        # the file it was loaded from. This clears the H5 handle, forgets
-        # slice paths, and paints a 1×1 empty frame so nothing in the GUI
-        # can keep an NFS lock alive on the file tomocupy is about to
-        # overwrite. Reopening after the recon is a single click.
+        Tomocupy's own ``--clear-folder`` step handles removing/truncating
+        the output on disk — we do NOT touch files here (an earlier version
+        deleted them and destroyed valid reconstructions when the new run
+        crashed)."""
         was_holding = self.full_h5 is not None or bool(self.full_files) or bool(self.preview_files)
         self._blank_viewer()
         if was_holding:
             self.log_output.append(
                 '<span style="color:#888;">🔓 Cleared viewer before '
                 'Full recon.</span>'
-            )
-
-        if not proj_file:
-            return
-        data_folder = self.data_path.text().strip()
-        if not data_folder:
-            return
-        proj_name = os.path.splitext(os.path.basename(proj_file))[0]
-        target = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec.h5")
-        parts_dir = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec_parts")
-
-        removed_any = False
-        if os.path.isfile(target):
-            try:
-                os.remove(target)
-                removed_any = True
-            except OSError as exc:
-                self.log_output.append(
-                    f'<span style="color:orange;">⚠️ Could not remove stale '
-                    f'{target}: {exc}</span>'
-                )
-        if os.path.isdir(parts_dir):
-            try:
-                import shutil
-                shutil.rmtree(parts_dir)
-                removed_any = True
-            except OSError as exc:
-                self.log_output.append(
-                    f'<span style="color:orange;">⚠️ Could not remove stale '
-                    f'{parts_dir}: {exc}</span>'
-                )
-        if removed_any:
-            self.log_output.append(
-                f'<span style="color:#888;">🧹 Cleared previous H5 output for '
-                f'{proj_name}.</span>'
             )
 
     def set_image_scale(self, img_path, flag=None):
