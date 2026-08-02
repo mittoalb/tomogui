@@ -3869,7 +3869,12 @@ class TomoGUI(QWidget):
         self._process_next_sync_file()
         
     def _run_tomolog_for_file(self, filepath):
-        """Run tomolog upload for a specific file using current GUI settings."""
+        """Run tomolog upload for a specific file using current GUI settings.
+
+        If the min/max fields are blank, a per-dataset 5-95 % percentile
+        contrast is computed from the reconstruction — that lets mass /
+        sync uploads adapt contrast automatically. Any value typed by
+        the user overrides the auto-contrast for that bound."""
         beamline = self.beamline_box.currentText()
         cloud = self.cloud_box.currentText()
         url = self.url_input.text().strip()
@@ -3879,6 +3884,23 @@ class TomoGUI(QWidget):
         vmin = self.min_input.text().strip()
         vmax = self.max_input.text().strip()
         note_value = self.get_note_value()
+
+        if not vmin or not vmax:
+            avmin, avmax = self._auto_contrast_for_file(filepath)
+            if not vmin and avmin is not None:
+                vmin = avmin
+            if not vmax and avmax is not None:
+                vmax = avmax
+            if avmin is not None and avmax is not None:
+                self.log_output.append(
+                    f'<span style="color:#888;">  auto contrast '
+                    f'{os.path.basename(filepath)}: min={vmin}, max={vmax}</span>'
+                )
+            else:
+                self.log_output.append(
+                    f'<span style="color:orange;">⚠️ no reconstruction TIFFs for '
+                    f'{os.path.basename(filepath)} — tomolog will use its own default contrast.</span>'
+                )
 
         cmd = [
             "tomolog", "run",
