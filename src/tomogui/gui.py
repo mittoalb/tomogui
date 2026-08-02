@@ -3598,6 +3598,12 @@ class TomoGUI(QWidget):
         env = QProcessEnvironment.systemEnvironment()
         if cuda_devices is not None:
             env.insert("CUDA_VISIBLE_DEVICES", str(cuda_devices))
+        # NFS-hosted data (e.g. /data2, /data3) rejects HDF5's default BSD
+        # file locks with EAGAIN, so tomocupy fails to create the output
+        # H5 with "Resource temporarily unavailable". Disable HDF5 file
+        # locking in the child; single-writer semantics are enforced by
+        # tomogui not launching concurrent recons on the same file.
+        env.insert("HDF5_USE_FILE_LOCKING", "FALSE")
         p.setProcessEnvironment(env)
         
         loop = QEventLoop() if wait else None
@@ -4493,7 +4499,15 @@ class TomoGUI(QWidget):
 
         if info['kind'] == 'h5':
             try:
-                self.full_h5 = h5py.File(info['h5_path'], 'r')
+                # locking=False avoids grabbing an OS lock the writer
+                # (tomocupy) would otherwise get EAGAIN on when the user
+                # relaunches Full recon on the same file over NFS.
+                try:
+                    self.full_h5 = h5py.File(info['h5_path'], 'r',
+                                             locking=False)
+                except (TypeError, ValueError):
+                    # Older h5py that doesn't expose the locking kwarg.
+                    self.full_h5 = h5py.File(info['h5_path'], 'r')
             except OSError as e:
                 self.log_output.append(
                     f'<span style="color:red;">\u274c Could not open '
@@ -7067,6 +7081,7 @@ class TomoGUI(QWidget):
             if machine == "Local":
                 env = QProcessEnvironment.systemEnvironment()
                 env.insert("CUDA_VISIBLE_DEVICES", str(gpu_id))
+                env.insert("HDF5_USE_FILE_LOCKING", "FALSE")
                 p.setProcessEnvironment(env)
             p.start(str(cmd[0]), [str(a) for a in cmd[1:]])
             if not p.waitForStarted(5000):
@@ -7228,6 +7243,7 @@ class TomoGUI(QWidget):
         if machine == "Local":
             env = QProcessEnvironment.systemEnvironment()
             env.insert("CUDA_VISIBLE_DEVICES", str(gpu_id))
+            env.insert("HDF5_USE_FILE_LOCKING", "FALSE")
             p.setProcessEnvironment(env)
 
         # Start process
