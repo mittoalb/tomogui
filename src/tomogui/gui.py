@@ -4558,16 +4558,24 @@ class TomoGUI(QWidget):
         self.full_h5_path = None
 
     def _release_full_h5_for_write(self, proj_file):
-        """Prepare the full-recon output slot for a new tomocupy write:
-          1. If the viewer holds this file open, close its H5 handle.
-          2. Delete any stale ``{proj}_rec.h5`` (and its ``_parts/`` sibling)
-             so tomocupy's ``h5py.File(..., "w")`` creates fresh instead of
-             colliding with a pre-existing file. On NFS the collision
-             manifests as ``BlockingIOError: EAGAIN`` even with HDF5 file
-             locking disabled, because tomocupy's own ``--clear-folder``
-             logic runs ``rm {fnameout}/*`` — which is a no-op when
-             ``fnameout`` is a file, not a directory.
-        """
+        """Prepare the full-recon output slot for a new tomocupy write.
+
+        Always closes any H5 the viewer currently has open — a mismatched
+        path is cheap to reopen, but a missed one leaves an NFS lock that
+        kills the recon. Then removes the target ``{proj}_rec.h5`` and its
+        ``_parts/`` sidecar so tomocupy's ``h5py.File(..., "w")`` starts
+        clean (tomocupy's own ``--clear-folder`` step runs ``rm {base}/*``
+        which is a no-op when the output is a file rather than a dir)."""
+        # Step 1: unconditionally drop any viewer handle. If we later realise
+        # the user wanted to keep viewing something unrelated, they can just
+        # click View Full again — reopening is instant.
+        if self.full_h5 is not None:
+            self.log_output.append(
+                '<span style="color:#888;">🔓 Closed viewer H5 handle '
+                'before Full recon.</span>'
+            )
+            self._close_full_h5()
+
         if not proj_file:
             return
         data_folder = self.data_path.text().strip()
@@ -4577,21 +4585,6 @@ class TomoGUI(QWidget):
         target = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec.h5")
         parts_dir = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec_parts")
 
-        # Close viewer handle if it points at this dataset.
-        if self.full_h5_path is not None:
-            try:
-                same = os.path.realpath(self.full_h5_path) == os.path.realpath(target)
-            except OSError:
-                same = self.full_h5_path == target
-            if same:
-                self.log_output.append(
-                    '<span style="color:#888;">🔓 Releasing viewer lock on '
-                    f'{os.path.basename(target)} before Full recon.</span>'
-                )
-                self._close_full_h5()
-
-        # Remove the old .h5 + its _parts/ sibling. Tomocupy's clear-folder
-        # step doesn't handle H5-format outputs, so we do it here.
         removed_any = False
         if os.path.isfile(target):
             try:
