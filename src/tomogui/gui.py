@@ -744,6 +744,7 @@ class TomoGUI(QWidget):
         self._build_Geometry_tab()
         self._build_Data_tab()        
         self._build_Performance_tab()
+        self._build_ai_tab()
         self._build_advanced_config_tab()
         # Progress bar
         # self.progress = QProgressBar()
@@ -1174,18 +1175,33 @@ class TomoGUI(QWidget):
             out.append(a)
         return out
 
-    def _apply_ai_cor(self, cmd, ai_search_method="fine"):
-        """Return ``cmd`` with the AI-COR flags applied *last*, and with any
-        stale ``--rotation-axis-*`` / ``--ai-search-method`` / model-path
-        entries the caller may have already appended stripped out first, so
-        the AI values are what argparse sees."""
+    def _apply_ai_cor(self, cmd, ai_search_method=None):
+        """Return ``cmd`` with the AI-COR flags applied *last*. Any stale
+        ``--rotation-axis-*`` / ``--ai-search-method`` / infer flags the
+        caller may have already appended are stripped first so argparse
+        sees only what we mean.
+
+        The search method (``fine`` or ``full``) defaults to whatever the
+        user picked on the AI COR tab. Extra ``--infer-*`` / ``--bin-infer-*``
+        parameters the user enabled on that tab are appended too.
+        """
+        if ai_search_method is None:
+            ai_search_method = self._current_ai_search_method()
         ai_flags = self._ai_cor_args(ai_search_method)
         if not ai_flags:
             return cmd
-        for flag in ("--rotation-axis-method", "--ai-search-method",
-                     "--infer-model-path", "--bin-infer-model-path"):
+
+        # Every flag the AI tab (or _ai_cor_args) can emit must be stripped
+        # from earlier positions — otherwise an opt-in on the tab could be
+        # shadowed by whatever a --config file or another gatherer produced
+        # first (argparse keeps the LAST occurrence).
+        strip_flags = {"--rotation-axis-method", "--ai-search-method",
+                       "--infer-model-path", "--bin-infer-model-path"}
+        tab_flags = self._gather_ai_args()
+        strip_flags.update(f for f in tab_flags if f.startswith("--"))
+        for flag in strip_flags:
             cmd = self._strip_flag(cmd, flag)
-        return cmd + ai_flags
+        return cmd + ai_flags + tab_flags
 
     def _ai_cor_args(self, ai_search_method="fine"):
         """Return tomocupy CLI flags that turn on its built-in AI COR finder
@@ -1976,7 +1992,7 @@ class TomoGUI(QWidget):
         add_line("--dark-file-name", "/path/dark.h5")
         add_line("--flat-file-name", "/path/flat.h5")
         add_line("--out-path-name", "/path/out")
-        add_combo("--save-format", ["tiff","h5","h5sino","h5nolinks"], default="tiff", include=False) #always include
+        add_combo("--save-format", ["h5nolinks","h5","h5sino","tiff"], default="h5nolinks", include=False) #always include; matches tomocupy default
         add_check("--config-update")
         add_line("--logs-home", "/home/user/logs", include=False) #always include
         add_check("--verbose", include=False) #always include
@@ -2154,6 +2170,214 @@ class TomoGUI(QWidget):
                 args += [flag, str(w.value())]
 
         return args
+
+# ===== AI COR TAB =====
+    def _build_ai_tab(self):
+        """AI COR settings tab. Exposes tomocupy's --infer-* (fine mode) and
+        --bin-infer-* (full/bin mode) inference parameters. The tab also owns
+        the --ai-search-method selector, which _apply_ai_cor reads to decide
+        which pipeline flag family to pass through."""
+        ai_tab = QWidget()
+        outer = QVBoxLayout(ai_tab)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        form_host = QWidget()
+        form = QFormLayout(form_host)
+        scroll.setWidget(form_host)
+        outer.addWidget(scroll)
+
+        self.ai_widgets = {}
+
+        def _add_row(flag, kind, w, default=None, label_text=None, include=True):
+            label_text = label_text or flag
+            label_widget = QWidget()
+            h = QHBoxLayout(label_widget)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(6)
+            lbl = QLabel(label_text)
+            include_cb = None
+            if include:
+                include_cb = QCheckBox()
+                include_cb.setChecked(False)
+                h.addWidget(include_cb)
+                lbl.setEnabled(False)
+                w.setEnabled(False)
+
+                def on_toggle(checked):
+                    lbl.setEnabled(checked)
+                    w.setEnabled(checked)
+                    if not checked:
+                        if kind in ("spin", "dspin") and default is not None:
+                            w.blockSignals(True)
+                            w.setValue(default)
+                            w.blockSignals(False)
+                        elif kind == "combo":
+                            if default is not None:
+                                w.setCurrentText(str(default))
+                            else:
+                                w.setCurrentIndex(0)
+                        elif kind == "line":
+                            w.clear()
+                        elif kind == "check":
+                            w.setChecked(False)
+
+                include_cb.toggled.connect(on_toggle)
+            else:
+                lbl.setEnabled(True)
+                w.setEnabled(True)
+            h.addWidget(lbl)
+            h.addStretch(1)
+            form.addRow(label_widget, w)
+            self.ai_widgets[flag] = (kind, w, include_cb, default)
+
+        def add_line(flag, placeholder="", tip="", width=240, include=True,
+                     default_text=""):
+            w = QLineEdit()
+            if placeholder:
+                w.setPlaceholderText(placeholder)
+            if tip:
+                w.setToolTip(tip)
+            w.setFixedWidth(width)
+            if default_text:
+                w.setText(default_text)
+            _add_row(flag, "line", w, default="", include=include)
+
+        def add_combo(flag, items, default=None, tip="", include=True):
+            w = QComboBox()
+            w.addItems(items)
+            if default in items:
+                w.setCurrentText(default)
+            if tip:
+                w.setToolTip(tip)
+            _add_row(flag, "combo", w, default=default, include=include)
+
+        def add_check(flag, tip="", include=True, default_checked=False):
+            w = QCheckBox()
+            if default_checked:
+                w.setChecked(True)
+            if tip:
+                w.setToolTip(tip)
+            _add_row(flag, "check", w, default=False, include=include)
+
+        def add_spin(flag, minv, maxv, step=1, default=None, tip="", include=True):
+            w = QSpinBox()
+            w.setRange(minv, maxv)
+            w.setSingleStep(step)
+            if default is not None:
+                w.setValue(default)
+            if tip:
+                w.setToolTip(tip)
+            _add_row(flag, "spin", w, default=default, include=include)
+
+        # Search-method selector (always included; controls which pipeline
+        # tomocupy runs and thus which flag family below is relevant).
+        add_combo("--ai-search-method", ["fine", "full"], default="fine",
+                  tip="fine: single-stage inference_pipeline. "
+                      "full: two-stage bin_inference_pipeline.",
+                  include=False)
+
+        # ---- fine-mode --infer-* params ---------------------------------
+        add_check("--infer-use-8bits", default_checked=True,
+                  tip="Requantize pixels to 8 bits before inference.")
+        add_line("--infer-downsample-factor",
+                 placeholder="[1] or [1,2,4]",
+                 tip="List of downsample factors applied to try slices.")
+        add_line("--infer-num-windows",
+                 placeholder="[3]",
+                 tip="Number of aggregation windows per slice.")
+        add_line("--infer-window-size",
+                 placeholder="[518]",
+                 tip="Square window size (DINOv2 native = 518).")
+        add_spin("--infer-seed-number", 0, 1_000_000, step=1, default=10,
+                 tip="RNG seed for reproducibility.")
+        add_combo("--infer-input-data-type", ["raw", "try"], default="raw",
+                  tip="Which cache the AI inference reads from.")
+        add_check("--infer-save-intermediate-data",
+                  tip="Save per-slice model predictions to predicts_all.npz.")
+        add_line("--infer-input-dir",
+                 placeholder="/path/to/tiff/dir or blank",
+                 tip="Direct TIFF input dir (bypass try cache).")
+        add_line("--infer-batch-list",
+                 placeholder="/path/to/list.txt or blank",
+                 tip="Batch txt file listing input directories.")
+        add_line("--infer-out-dir-name",
+                 placeholder="/path/for/output or blank",
+                 tip="Output batches directory.")
+
+        # ---- full/bin-mode --bin-infer-* params -------------------------
+        add_line("--bin-infer-bin-sizes",
+                 placeholder="[24,12]",
+                 tip="Pixel step per bin per refinement stage.")
+        add_line("--bin-infer-bin-counts",
+                 placeholder="[4,2]",
+                 tip="Bins per stage (must be even).")
+        add_spin("--bin-infer-num-frames", 1, 1024, step=1, default=2,
+                 tip="Frames aggregated per bin.")
+        add_line("--bin-infer-num-windows",
+                 placeholder="[20]",
+                 tip="Aggregation windows for bin inference.")
+        add_line("--bin-infer-window-size",
+                 placeholder="[518]",
+                 tip="Square window size for bin inference.")
+        add_spin("--bin-infer-aggregator-depth", 1, 64, step=1, default=5,
+                 tip="Attention layers in the feature aggregator.")
+        add_spin("--bin-infer-aggregator-num-heads", 1, 64, step=1, default=12,
+                 tip="Attention heads per layer.")
+        add_line("--bin-infer-downsample-factor",
+                 placeholder="[1]",
+                 tip="Downsample factor applied to try slices (bin mode).")
+        add_combo("--bin-infer-input-data-type", ["raw", "try"], default="raw",
+                  tip="Which cache the bin AI reads from.")
+        add_spin("--bin-infer-seed-number", 0, 1_000_000, step=1, default=10,
+                 tip="RNG seed for reproducibility (bin mode).")
+        add_check("--bin-infer-use-8bits", default_checked=True,
+                  tip="Requantize pixels to 8 bits (bin mode).")
+        add_check("--bin-infer-save-intermediate-data",
+                  tip="Save per-slice bin predictions to range_predicts_all.npz.")
+        add_line("--bin-infer-input-dir",
+                 placeholder="/path/to/tiff/dir or blank")
+        add_line("--bin-infer-batch-list",
+                 placeholder="/path/to/list.txt or blank")
+        add_line("--bin-infer-out-dir-name",
+                 placeholder="/path/for/output or blank")
+
+        self.tabs.addTab(ai_tab, "AI COR")
+
+    def _gather_ai_args(self):
+        """Return the AI-COR CLI flags currently enabled on the AI tab.
+        Skipped when the model path is not set (nothing else makes sense
+        without a model)."""
+        model_path = self.ai_model_path.text().strip()
+        if not model_path or not os.path.exists(model_path):
+            return []
+        args = []
+        for flag, (kind, w, include_cb, _default) in self.ai_widgets.items():
+            if include_cb is not None and not include_cb.isChecked():
+                continue
+            if kind == "line":
+                val = w.text().strip()
+                if val != "":
+                    args += [flag, val]
+            elif kind == "combo":
+                args += [flag, w.currentText().strip()]
+            elif kind == "check":
+                if w.isChecked():
+                    args += [flag]
+            elif kind in ("spin", "dspin"):
+                args += [flag, str(w.value())]
+        return args
+
+    def _current_ai_search_method(self):
+        """Read the AI search method (fine|full) from the tab widget."""
+        entry = getattr(self, 'ai_widgets', {}).get("--ai-search-method")
+        if entry is None:
+            return "fine"
+        _, w, _, _ = entry
+        try:
+            return w.currentText().strip() or "fine"
+        except (AttributeError, RuntimeError):
+            return "fine"
 
         # ===== advanced config tab====
     def _build_advanced_config_tab(self):
