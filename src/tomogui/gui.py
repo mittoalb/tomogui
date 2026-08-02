@@ -4247,6 +4247,9 @@ class TomoGUI(QWidget):
         proj_file = self.highlight_scan
         if proj_file:
             self._persist_params_for_files([proj_file])
+        # Release any viewer handle on this file's H5 output so tomocupy
+        # can overwrite it — h5py write mode fails if a reader is still open.
+        self._release_full_h5_for_write(proj_file)
         # Mark this file as running locally and grey out button only for it
         self._running_full_file = proj_file
         self._update_full_btn_state()
@@ -4539,6 +4542,27 @@ class TomoGUI(QWidget):
                 pass
         self.full_h5 = None
         self.full_h5_path = None
+
+    def _release_full_h5_for_write(self, proj_file):
+        """Close the full-recon H5 viewer if it's holding open the file
+        tomocupy is about to overwrite. HDF5 write mode fails when a reader
+        (even in the same process) still has the file open, so this must
+        run before every Full recon launch on ``proj_file``."""
+        if self.full_h5_path is None or not proj_file:
+            return
+        data_folder = self.data_path.text().strip()
+        proj_name = os.path.splitext(os.path.basename(proj_file))[0]
+        target = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec.h5")
+        try:
+            same = os.path.realpath(self.full_h5_path) == os.path.realpath(target)
+        except OSError:
+            same = self.full_h5_path == target
+        if same:
+            self.log_output.append(
+                '<span style="color:#888;">🔓 Releasing viewer lock on '
+                f'{os.path.basename(target)} before Full recon.</span>'
+            )
+            self._close_full_h5()
 
     def set_image_scale(self, img_path, flag=None):
         if flag == "raw":
@@ -7079,6 +7103,9 @@ class TomoGUI(QWidget):
                     return None  #return None to indicate failure
 
         elif recon_type == 'full':
+            # Same file about to be rewritten by tomocupy — release the
+            # viewer's H5 handle if it points at this dataset.
+            self._release_full_h5_for_write(file_path)
             recon_way = self.recon_way_box_full.currentText()
             cor_val = file_info['cor_input'].text().strip()
             rec_method = self.cor_full_method.currentText()
