@@ -7437,25 +7437,38 @@ class TomoGUI(QWidget):
         return p
 
     def _on_process_output(self, process, filename, is_error=False):
-        """Handle stdout/stderr from batch reconstruction processes"""
+        """Handle stdout/stderr from batch reconstruction processes.
+
+        Mirrors the child process's output to BOTH the GUI log panel and
+        the parent terminal (sys.stdout / sys.stderr). Users running tomogui
+        from a shell expect to see tomocupy progress in that shell, not just
+        in the GUI's log widget.
+        """
+        import sys
         if is_error:
             data = bytes(process.readAllStandardError()).decode(errors="ignore")
             color = "orange"
-            prefix = ""
+            sink = sys.stderr
         else:
             data = bytes(process.readAllStandardOutput()).decode(errors="ignore")
             color = "gray"
-            prefix = ""
+            sink = sys.stdout
 
-        if data.strip():
-            # Show output in log with filename context
-            basename = os.path.basename(filename)
-            lines = data.strip().split('\n')
-            for line in lines:
-                if line.strip():
-                    self.log_output.append(
-                      f'<span style="color:{color};">{prefix} [{basename}] {line}</span>'
-                    )
+        if not data.strip():
+            return
+
+        basename = os.path.basename(filename)
+        try:
+            sink.write(data if data.endswith("\n") else data + "\n")
+            sink.flush()
+        except (OSError, ValueError):
+            pass
+
+        for line in data.strip().split('\n'):
+            if line.strip():
+                self.log_output.append(
+                    f'<span style="color:{color};">[{basename}] {line}</span>'
+                )
 
     def _set_cor_cell(self, file_info, cor_val):
         """Robustly update a batch-table row's COR cell. Returns True iff
