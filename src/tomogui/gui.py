@@ -4493,20 +4493,68 @@ class TomoGUI(QWidget):
         self.log_output.append(f"\u2705[INFO] COR saved for: {os.path.basename(proj_file)}")
 
     # ===== IMAGE VIEWING =====
-    def view_try_reconstruction(self):
+    def _preflight_view(self, kind):
+        """Common validation for View Try / View Full.
+
+        Returns ``(data_folder, proj_file, proj_name)`` on success. On any
+        failure, blanks the viewer, logs a red message, pops a QMessageBox
+        (so the user can't miss it), and returns ``None``. ``kind`` is
+        just a label like "Try" / "Full" for the message text."""
         data_folder = self.data_path.text().strip()
-        proj_file = self.highlight_scan #the scan highlighted in main table full path
+        proj_file = self.highlight_scan
+        if not data_folder or not os.path.isdir(data_folder):
+            msg = (f"View {kind}: no data folder is set. "
+                   f"Pick a folder in the Main tab first.")
+            self._blank_viewer()
+            self.log_output.append(f'<span style="color:red;">\u274c {msg}</span>')
+            QMessageBox.warning(self, f"View {kind}", msg)
+            return None
+        if not proj_file:
+            msg = (f"View {kind}: no file selected. "
+                   f"Click a row in the table first.")
+            self._blank_viewer()
+            self.log_output.append(f'<span style="color:red;">\u274c {msg}</span>')
+            QMessageBox.warning(self, f"View {kind}", msg)
+            return None
+        if not os.path.isfile(proj_file):
+            msg = (f"View {kind}: source file no longer exists:\n{proj_file}")
+            self._blank_viewer()
+            self.log_output.append(f'<span style="color:red;">\u274c {msg}</span>')
+            QMessageBox.warning(self, f"View {kind}", msg)
+            return None
         proj_name = os.path.splitext(os.path.basename(proj_file))[0]
-        try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
-        self.preview_files = [] #clean it before use
-        self.preview_files = sorted(glob.glob(os.path.join(try_dir, "*.tiff")))
-        if not self.preview_files:
-            self.log_output.append(f'<span style="color:red;">\u274c No try reconstruction found in {try_dir}</span>')
+        return data_folder, proj_file, proj_name
+
+    def view_try_reconstruction(self):
+        pf = self._preflight_view("Try")
+        if pf is None:
             return
-        self.log_output.append(f"first: {self.preview_files[0]}; last: {self.preview_files[-1]}")
+        data_folder, proj_file, proj_name = pf
+
+        try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
+        preview_files = sorted(glob.glob(os.path.join(try_dir, "*.tiff")))
+        if not preview_files:
+            self._blank_viewer()
+            base = os.path.basename(proj_file)
+            if not os.path.isdir(try_dir):
+                msg = (f"View Try: no try_center directory for {base}.\n"
+                       f"Expected: {try_dir}\n\n"
+                       f"Run a Try reconstruction on this file first.")
+            else:
+                msg = (f"View Try: directory exists but contains no .tiff "
+                       f"slices for {base}:\n{try_dir}")
+            self.log_output.append(f'<span style="color:red;">\u274c {msg}</span>')
+            QMessageBox.warning(self, "View Try", msg)
+            return
+
+        self.preview_files = preview_files
+        self.log_output.append(
+            f"Try recon: {os.path.basename(proj_file)} \u2014 {len(preview_files)} "
+            f"slice(s), first {os.path.basename(preview_files[0])}, "
+            f"last {os.path.basename(preview_files[-1])}"
+        )
         self._clear_roi()
         self._reset_view_state()
-        #self.set_image_scale(self.preview_files[0])
         try:
             self.slice_slider.valueChanged.disconnect()
         except TypeError:
@@ -4514,12 +4562,14 @@ class TomoGUI(QWidget):
         self.slice_slider.setMaximum(len(self.preview_files) - 1)
         self.slice_slider.valueChanged.connect(self.update_try_slice)
         self._try_proj_name = proj_name
-        self.update_try_slice()  
+        self.update_try_slice()
 
     def view_full_reconstruction(self):
-        data_folder = self.data_path.text().strip()
-        proj_file = self.highlight_scan
-        proj_name = os.path.splitext(os.path.basename(proj_file))[0]
+        pf = self._preflight_view("Full")
+        if pf is None:
+            return
+        data_folder, proj_file, proj_name = pf
+
         info = self._resolve_full_recon(data_folder, proj_name)
 
         # Close any previously-open H5 handle before switching source.
@@ -4534,17 +4584,25 @@ class TomoGUI(QWidget):
                     self.full_h5 = h5py.File(info['h5_path'], 'r',
                                              locking=False)
                 except (TypeError, ValueError):
-                    # Older h5py that doesn't expose the locking kwarg.
                     self.full_h5 = h5py.File(info['h5_path'], 'r')
             except OSError as e:
-                self.log_output.append(
-                    f'<span style="color:red;">\u274c Could not open '
-                    f'{info["h5_path"]}: {e}</span>'
-                )
+                self._blank_viewer()
+                msg = (f"View Full: could not open H5 output for "
+                       f"{os.path.basename(proj_file)}:\n{info['h5_path']}"
+                       f"\n\n{e}")
+                self.log_output.append(f'<span style="color:red;">\u274c {msg}</span>')
+                QMessageBox.warning(self, "View Full", msg)
                 return
             self.full_h5_path = info['h5_path']
             n = info['n_slices']
-            # full_files carries slice indices when we're in H5 mode.
+            if n <= 0:
+                self._close_full_h5()
+                self._blank_viewer()
+                msg = (f"View Full: H5 exists but /exchange/data is empty:\n"
+                       f"{info['h5_path']}")
+                self.log_output.append(f'<span style="color:red;">\u274c {msg}</span>')
+                QMessageBox.warning(self, "View Full", msg)
+                return
             self.full_files = list(range(n))
             self.log_output.append(
                 f'\ud83d\udce6 Full recon: {os.path.basename(info["h5_path"])} '
@@ -4553,14 +4611,19 @@ class TomoGUI(QWidget):
         elif info['kind'] == 'tiff':
             self.full_files = info['tiff_files']
             self.log_output.append(
-                f"first: {self.full_files[0]}; last: {self.full_files[-1]}"
+                f"Full recon: {len(self.full_files)} tiff(s), first "
+                f"{os.path.basename(self.full_files[0])}, last "
+                f"{os.path.basename(self.full_files[-1])}"
             )
         else:
+            self._blank_viewer()
             base = os.path.join(f"{data_folder}_rec", f"{proj_name}_rec")
-            self.log_output.append(
-                f'<span style="color:red;">\u274c No full reconstruction found '
-                f'at {base}[.h5] or {base}/*.tiff</span>'
-            )
+            msg = (f"View Full: no reconstruction found for "
+                   f"{os.path.basename(proj_file)}.\n"
+                   f"Checked:\n  \u2022 {base}.h5\n  \u2022 {base}/*.tiff\n\n"
+                   f"Run a Full reconstruction on this file first.")
+            self.log_output.append(f'<span style="color:red;">\u274c {msg}</span>')
+            QMessageBox.warning(self, "View Full", msg)
             return
 
         self._clear_roi()
