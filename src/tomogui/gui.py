@@ -5013,6 +5013,10 @@ class TomoGUI(QWidget):
     def _safe_open_image(self, path, flag=None, retries=3):
         # flag values: None → TIFF path, "raw" → projection index into raw H5,
         # "full_h5" → slice index into the open full-recon H5.
+        # Returns the array on success, or None if every attempt failed
+        # (e.g. H5 volume being actively written by tomocupy, missing part
+        # files, corrupt header). Callers must handle None.
+        last_exc = None
         for _ in range(retries):
             try:
                 if flag == "raw":
@@ -5021,27 +5025,41 @@ class TomoGUI(QWidget):
                     return self.full_h5['/exchange/data'][int(path), :, :]
                 with Image.open(path) as im:
                     return np.array(im)
-            except (OSError, KeyError):
+            except (OSError, KeyError, ValueError) as exc:
+                last_exc = exc
                 QApplication.processEvents()
-        if flag == "raw":
-            return self._raw_h5['/exchange/data'][path, :, :]
-        if flag == "full_h5":
-            return self.full_h5['/exchange/data'][int(path), :, :]
-        with Image.open(path) as im:
-            return np.array(im)
+        self.log_output.append(
+            f'<span style="color:orange;">Could not read image '
+            f'({flag or "tiff"}, {path!r}): {last_exc}. '
+            f'File may still be under reconstruction.</span>'
+        )
+        return None
 
     def show_image(self, img_path, flag=None):
         # flag: None → TIFF path; "raw" → raw projection index (dark/flat
         # corrected inline); "full_h5" → slice index into self.full_h5.
         if flag == "raw":
-            img = self._raw_h5['/exchange/data'][img_path, :, :]
-            img = (img - self.dark) / (self.flat - self.dark)
+            try:
+                img = self._raw_h5['/exchange/data'][img_path, :, :]
+                img = (img - self.dark) / (self.flat - self.dark)
+            except (OSError, KeyError, ValueError) as exc:
+                self._blank_viewer()
+                self.log_output.append(
+                    f'<span style="color:orange;">Could not read raw '
+                    f'projection {img_path}: {exc}</span>'
+                )
+                return
         elif flag == "full_h5":
             img = self._safe_open_image(img_path, flag="full_h5")
         else:
             img = self._safe_open_image(img_path)
-            if img.ndim == 3:
+            if img is not None and img.ndim == 3:
                 img = img[..., 0]
+        if img is None:
+            # _safe_open_image already logged; just make sure the viewer
+            # isn't left showing a stale frame from another file.
+            self._blank_viewer()
+            return
         h, w = img.shape
         self._current_img = img
         self._current_img_path = img_path
