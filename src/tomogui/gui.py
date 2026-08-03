@@ -3495,11 +3495,15 @@ class TomoGUI(QWidget):
     def save_log(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_fn = f"Process_log_{timestamp}.txt"
-        if not os.path.exists(log_fn):
-            with open(log_fn, "a", encoding="utf-8") as f:  
-                for line in self.log_output:
-                    f.write(f"{line}\n")
-            self.log_output.append(f'\u2705 Saved log to {log_fn}')
+        if os.path.exists(log_fn):
+            return
+        # QTextEdit isn't iterable; pull its plain text contents.
+        text = self.log_output.toPlainText()
+        with open(log_fn, "w", encoding="utf-8") as f:
+            f.write(text)
+            if not text.endswith("\n"):
+                f.write("\n")
+        self.log_output.append(f'\u2705 Saved log to {log_fn}')
 
 
     def preset_beamhardening(self):
