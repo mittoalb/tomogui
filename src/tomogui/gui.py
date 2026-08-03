@@ -4626,6 +4626,22 @@ class TomoGUI(QWidget):
             except (ValueError, TypeError, RuntimeError, AttributeError):
                 pass
 
+    def _middle_of_width(self, proj_file):
+        """Return image_width / 2 read from ``proj_file`` (/exchange/data
+        shape is (nproj, nz, nx)). Used as the AI-COR fallback seed when
+        neither the row nor the top-bar carries a valid number. Returns
+        ``None`` if the file can't be opened or the dataset is missing."""
+        if not proj_file or not os.path.isfile(proj_file):
+            return None
+        try:
+            with h5py.File(proj_file, 'r') as fh:
+                shape = fh['/exchange/data'].shape
+        except (OSError, KeyError):
+            return None
+        if len(shape) < 3:
+            return None
+        return float(shape[2]) / 2.0
+
     def _release_full_h5_for_write(self, proj_file):
         """Blank the viewer and drop any H5 handle it holds so tomocupy can
         overwrite the file without colliding with the GUI's reader.
@@ -6400,17 +6416,14 @@ class TomoGUI(QWidget):
             elif not top_bar_ok and self.cor_method_box.currentText() != "auto":
                 missing_seed.append(fi['filename'])
 
-        if run_try and missing_seed:
+        # No hard failure on missing_seed anymore — files without row / top-bar
+        # / series donor will be seeded with image_width / 2 further down.
+        if missing_seed:
             self.log_output.append(
-                '<span style="color:red;">❌ AI Reco Try needs a starting COR for '
-                'every selected file. The following have no row COR, no series-mean '
-                'donor, and no valid top-bar fallback:</span>'
+                f'<span style="color:#888;">📐 {len(missing_seed)} file(s) have '
+                f'no COR anywhere; they will be seeded with mid-width at '
+                f'dispatch time.</span>'
             )
-            for fn in missing_seed[:10]:
-                self.log_output.append(f'   {fn}')
-            if len(missing_seed) > 10:
-                self.log_output.append(f'   (+{len(missing_seed) - 10} more)')
-            return
 
         # Count how many will use the row COR vs the top-bar fallback
         row_cor_count = sum(1 for fi in selected_files
@@ -6463,16 +6476,27 @@ class TomoGUI(QWidget):
             f'tab settings apply to every file.</span>'
         )
 
-        # Mirror each file's per-row seed into the top-bar COR the moment
-        # _batch_run_with_queue dispatches that file's try job — not feasible
-        # because the queue runs subprocesses in parallel. Instead: for every
-        # file with a per-row COR, ensure the row's cor_input is populated so
-        # the try-reco subprocess builder (_build_batch_cmd) picks it up.
-        # (That builder already reads row_cor first, top-bar second.)
+        # Every file needs a seed COR that tomocupy's AI can refine around.
+        # Precedence: row COR > top-bar COR > centre of the image width
+        # (read from /exchange/data.shape[2] of the source H5).
         for fi in selected_files:
             row_txt = fi['cor_input'].text().strip() if fi.get('cor_input') else ""
-            if not row_txt and top_bar_ok:
+            try:
+                float(row_txt)
+                continue    # already a valid seed
+            except (ValueError, TypeError):
+                pass
+            # No row value — try top-bar, then middle-of-width.
+            if top_bar_ok:
                 fi['cor_input'].setText(top_bar_txt)
+                continue
+            mid = self._middle_of_width(fi.get('path'))
+            if mid is not None:
+                fi['cor_input'].setText(f"{mid:.1f}")
+                self.log_output.append(
+                    f'<span style="color:#888;">📐 {os.path.basename(fi["path"])}: '
+                    f'no COR — seeding AI with mid-width = {mid:.1f}</span>'
+                )
 
         self._batch_active = True
         data_folder = self.data_path.text().strip()
@@ -6506,7 +6530,8 @@ class TomoGUI(QWidget):
             if run_infer:
                 self.log_output.append(
                     f'<span style="color:#1a8cff;">── Phase B: Try + AI COR — '
-                    f'{len(selected_files)} file(s), {num_gpus} GPU slot(s)…</span>'
+                    f'{len(selected_files)} file(s), {num_gpus} GPU slot(s). '
+                    f'Row COR is used as the AI seed; the AI refines around it.</span>'
                 )
                 QApplication.processEvents()
                 self._run_batch_with_queue(selected_files, recon_type='infer',
@@ -6515,8 +6540,7 @@ class TomoGUI(QWidget):
                 # ─── The ONE place that writes AI CORs back to the table ───
                 # Scan column 1 (filename) to find the row, then setText on
                 # cellWidget(row, 2). No stored widget references, no lambda
-                # captures, no cross-thread state. If this doesn't work,
-                # nothing will.
+                # captures, no cross-thread state.
                 inferred = 0
                 for fi in selected_files:
                     proj_file = fi.get('path') or fi.get('file')
