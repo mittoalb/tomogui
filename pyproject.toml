@@ -34,4 +34,4 @@ tomogui = "tomogui.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-tomogui = ["styles/*.py", "AImodels/**/*.pt", "AImodels/**/*.pth", "chatbot_knowledge.md"]
+tomogui = ["styles/*.py", "chatbot_knowledge.md"]

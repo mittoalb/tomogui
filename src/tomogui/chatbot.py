@@ -20,6 +20,7 @@ Credential discovery (returns api_key + optional base_url):
 import functools
 import json
 import os
+import sys
 import subprocess
 from pathlib import Path
 
@@ -35,15 +36,27 @@ KNOWLEDGE_PATH = Path(__file__).parent / "chatbot_knowledge.md"
 SETTINGS_PATH = Path.home() / ".config" / "tomogui" / "api_key"
 CHATBOT_CONFIG_PATH = Path.home() / ".config" / "tomogui" / "chatbot.json"
 
-# Listed in roughly best→cheapest order. The Argo gateway may only support
-# a subset; users can pick whichever the gateway accepts.
-MODELS = [
+# Two naming styles coexist depending on the endpoint:
+#   • Anthropic console & SDK   → "claude-opus-4-7"
+#   • Argonne Argo gateway       → "Claude Opus 4.7" (display form)
+# The dropdown lists both so the user can pick the one their endpoint
+# accepts; it's editable for anything else.
+MODELS_ANTHROPIC = [
     "claude-opus-4-7",
     "claude-opus-4-6",
     "claude-sonnet-4-6",
     "claude-haiku-4-5",
 ]
-DEFAULT_MODEL = MODELS[0]
+MODELS_ARGO = [
+    "Claude Opus 4.7",
+    "Claude Opus 4.6",
+    "Claude Sonnet 4.6",
+    "Claude Haiku 4.5",
+    "GPT-4o",
+    "GPT-5",
+]
+MODELS = MODELS_ANTHROPIC + MODELS_ARGO
+DEFAULT_MODEL = MODELS_ANTHROPIC[0]
 
 
 def _load_chatbot_config() -> dict:
@@ -54,7 +67,17 @@ def _load_chatbot_config() -> dict:
     try:
         data = json.loads(CHATBOT_CONFIG_PATH.read_text(encoding="utf-8"))
         if isinstance(data, dict):
-            defaults.update({k: v for k, v in data.items() if k in defaults})
+            # Drop empty / whitespace-only values — earlier versions of the
+            # chatbot used currentTextChanged which would write "" while the
+            # user was deleting and retyping, leaving a corrupt file that
+            # makes the dropdown look empty on next launch.
+            cleaned = {
+                k: v for k, v in data.items()
+                if k in defaults
+                and isinstance(v, str)
+                and v.strip()
+            }
+            defaults.update(cleaned)
     except (OSError, json.JSONDecodeError):
         pass
     return defaults
@@ -136,6 +159,14 @@ def _find_credentials() -> tuple[str | None, str | None]:
     if env_key:
         return env_key, base_url
 
+    # 1b. Same env block of ~/.claude/settings.json — same place
+    # ANTHROPIC_BASE_URL lives. Gateways like Argo issue identifier-style
+    # keys (e.g. an ANL username), not sk-ant-… tokens, so we accept any
+    # non-empty string here.
+    settings_key = settings_env.get("ANTHROPIC_API_KEY", "").strip()
+    if settings_key:
+        return settings_key, base_url
+
     # 2. Claude Code's apiKeyHelper (Argonne-style flow)
     helper = settings.get("apiKeyHelper")
     if isinstance(helper, str) and helper.strip():
@@ -143,11 +174,12 @@ def _find_credentials() -> tuple[str | None, str | None]:
         if v:
             return v, base_url
 
-    # 3. Tomogui's own settings file
+    # 3. Tomogui's own settings file. Accept any non-empty value — gateway
+    # keys (Argo etc.) are not sk-ant-… prefixed.
     if SETTINGS_PATH.exists():
         try:
             v = SETTINGS_PATH.read_text(encoding="utf-8").strip()
-            if v.startswith("sk-ant-"):
+            if v:
                 return v, base_url
         except OSError:
             pass
@@ -159,8 +191,8 @@ def _find_credentials() -> tuple[str | None, str | None]:
             data = json.loads(cc.read_text(encoding="utf-8"))
             for field in ("api_key", "anthropic_api_key", "key"):
                 v = data.get(field, "")
-                if isinstance(v, str) and v.startswith("sk-ant-"):
-                    return v, base_url
+                if isinstance(v, str) and v.strip():
+                    return v.strip(), base_url
         except (OSError, json.JSONDecodeError):
             pass
 
@@ -241,29 +273,75 @@ class ChatWorker(QObject):
 
         try:
             self.started_response.emit()
-            with client.messages.stream(
-                model=self._model,
-                max_tokens=64000,
-                system=system_blocks,
-                messages=messages,
-                output_config={"effort": "medium"},
-            ) as stream:
-                for text in stream.text_stream:
-                    if self._cancel:
-                        break
+            # Gateways (Argo, etc.) often don't pipe SSE streams cleanly
+            # and reject extras like `output_config` or the extended-cache
+            # `ttl` field. When a custom base_url is in use, fall back to
+            # non-streaming `create()` with a conservative max_tokens and
+            # strip ttl from cache_control — same shape pystream sends.
+            if self._base_url:
+                # Sanitise system blocks: drop cache_control entirely on
+                # gateways since some (Argo) reject any extended cache hints
+                # outright, not just the ttl sub-field.
+                sanitised_system = []
+                for blk in (system_blocks or []):
+                    if not isinstance(blk, dict):
+                        sanitised_system.append(blk)
+                        continue
+                    blk = {k: v for k, v in blk.items()
+                           if k != "cache_control"}
+                    sanitised_system.append(blk)
+                # Stderr breadcrumb so the launching terminal shows what
+                # we actually send — invaluable for diagnosing 401s when
+                # pystream works but tomogui doesn't.
+                key_repr = (self._api_key[:3] + "…" + self._api_key[-2:]
+                            if self._api_key and len(self._api_key) > 5
+                            else "<short>")
+                print(
+                    f"[tomogui-chatbot] POST {self._base_url}/v1/messages  "
+                    f"model={self._model!r}  key={key_repr}  "
+                    f"system_blocks={len(sanitised_system)}  "
+                    f"messages={len(messages)}",
+                    file=sys.stderr, flush=True,
+                )
+                response = client.messages.create(
+                    model=self._model,
+                    max_tokens=4096,
+                    system=sanitised_system,
+                    messages=messages,
+                )
+                text = "".join(
+                    getattr(b, "text", "") for b in response.content
+                    if getattr(b, "type", None) == "text"
+                )
+                if text:
                     self.chunk.emit(text)
-                if self._cancel:
-                    # Don't call get_final_message — it would block waiting
-                    # for the rest of the response. Exiting the with-block
-                    # closes the HTTP stream.
-                    self.cancelled.emit()
-                    return
-                final = stream.get_final_message()
-            self.done.emit(final)
+                self.done.emit(response)
+            else:
+                with client.messages.stream(
+                    model=self._model,
+                    max_tokens=64000,
+                    system=system_blocks,
+                    messages=messages,
+                    output_config={"effort": "medium"},
+                ) as stream:
+                    for text in stream.text_stream:
+                        if self._cancel:
+                            break
+                        self.chunk.emit(text)
+                    if self._cancel:
+                        # Don't call get_final_message — it would block waiting
+                        # for the rest of the response. Exiting the with-block
+                        # closes the HTTP stream.
+                        self.cancelled.emit()
+                        return
+                    final = stream.get_final_message()
+                self.done.emit(final)
 
         except anthropic.AuthenticationError:
             self.error.emit(
-                "Invalid API key (401). Click 'Edit key' to update."
+                "Invalid API key (401). Click 'Edit key' next to the model "
+                "dropdown to enter a new one, or fix "
+                "$ANTHROPIC_API_KEY / ~/.claude/settings.json and restart."
             )
         except anthropic.APIConnectionError as e:
             self.error.emit(
@@ -314,7 +392,8 @@ class ChatBotDialog(QDialog):
         self._busy = False
         self._cached_key: str | None = None
         self._cached_base_url: str | None = None
-        self._model = _load_chatbot_config().get("model", DEFAULT_MODEL)
+        loaded_model = _load_chatbot_config().get("model", DEFAULT_MODEL)
+        self._model = loaded_model.strip() if isinstance(loaded_model, str) and loaded_model.strip() else DEFAULT_MODEL
 
         self._build_ui()
         self._setup_worker()
@@ -343,11 +422,32 @@ class ChatBotDialog(QDialog):
             self.model_combo.insertItem(0, self._model)
         self.model_combo.setCurrentText(self._model)
         self.model_combo.setToolTip(
-            "Pick a Claude model. The Argo gateway may only support a subset.\n"
-            "You can also type a custom model string (must be a valid Anthropic model ID)."
+            "Pick or type a model id. Examples:\n"
+            "  • Anthropic console:  claude-opus-4-7\n"
+            "  • Argonne Argo:        Claude Opus 4.7 / GPT-4o / GPT-5\n"
+            "Selection is saved when you press Enter, click elsewhere, or "
+            "pick from the dropdown."
         )
-        self.model_combo.currentTextChanged.connect(self._on_model_changed)
+        # Wire to `activated` (only fires when a dropdown item is picked)
+        # and `editingFinished` on the inner line edit (only fires when
+        # focus leaves or Enter is pressed) — NOT `currentTextChanged`,
+        # which fires on every keystroke and would cause partial values
+        # to be saved and sent to the worker mid-typing.
+        self.model_combo.activated.connect(
+            lambda _i: self._on_model_changed(self.model_combo.currentText())
+        )
+        if self.model_combo.lineEdit() is not None:
+            self.model_combo.lineEdit().editingFinished.connect(
+                lambda: self._on_model_changed(self.model_combo.currentText())
+            )
         header.addWidget(self.model_combo)
+        self.edit_key_btn = QPushButton("Edit key")
+        self.edit_key_btn.setToolTip(
+            "Enter or replace the API key (Anthropic console key, "
+            "Argonne Argo username, or other gateway token)."
+        )
+        self.edit_key_btn.clicked.connect(self._on_edit_key)
+        header.addWidget(self.edit_key_btn)
         self.new_chat_btn = QPushButton("New chat")
         self.new_chat_btn.setToolTip("Clear the conversation history")
         self.new_chat_btn.clicked.connect(self._on_new_chat)
@@ -560,6 +660,23 @@ class ChatBotDialog(QDialog):
         except OSError:
             pass  # not fatal — selection still applies for this session
 
+    def _on_edit_key(self):
+        """Pop the key entry dialog and update the live credentials."""
+        new_key = self._prompt_for_key()
+        if not new_key:
+            return
+        # Re-resolve base_url so the new key pairs with whatever the env /
+        # settings file dictates (or stays with whatever was cached).
+        _, base_url = _find_credentials()
+        self._cached_key = new_key
+        self._cached_base_url = base_url or self._cached_base_url
+        self._worker.set_credentials(self._cached_key, self._cached_base_url)
+        src = self._describe_credential_source()
+        self.status_label.setText(
+            f"credentials updated — {src}"
+            + (f" → {self._cached_base_url}" if self._cached_base_url else "")
+        )
+
     def _on_new_chat(self):
         if self._busy:
             return
@@ -587,19 +704,20 @@ class ChatBotDialog(QDialog):
     def _prompt_for_key(self) -> str:
         key, ok = QInputDialog.getText(
             self,
-            "Enter Claude API key",
-            "Paste your Anthropic API key (starts with sk-ant-…).\n"
-            "It will be saved to ~/.config/tomogui/api_key with mode 0600.",
+            "Enter API key",
+            "Paste your API key.\n\n"
+            "• Anthropic console:  sk-ant-…\n"
+            "• Argonne Argo:       your ANL username\n"
+            "• Other gateway:      whatever the gateway issued you\n\n"
+            "Saved to ~/.config/tomogui/api_key (mode 0600).",
             QLineEdit.Password,
         )
         if not ok:
             return ""
         key = key.strip()
-        if not key.startswith("sk-ant-"):
+        if not key:
             QMessageBox.warning(
-                self,
-                "Invalid key",
-                "API keys start with 'sk-ant-'. Nothing was saved.",
+                self, "Invalid key", "Key was empty. Nothing saved.",
             )
             return ""
         try:
