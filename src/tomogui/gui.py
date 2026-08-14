@@ -57,7 +57,7 @@ if VISPY_AVAILABLE:
 # PyQtGraph: pure-software renderer that works over SSH X11 forwarding
 try:
     import pyqtgraph as pg
-    import matplotlib.cm as _mpl_cm
+    import matplotlib as _mpl
     pg.setConfigOptions(useOpenGL=False, imageAxisOrder='row-major')
     PG_AVAILABLE = True
 except ImportError:
@@ -2624,7 +2624,7 @@ class TomoGUI(QWidget):
             self.canvas.update()
         elif not VISPY_AVAILABLE and self._current_img is not None:
             try:
-                lut = (_mpl_cm.colormaps[self.current_cmap](np.linspace(0, 1, 256)) * 255).astype(np.uint8)
+                lut = (_mpl.colormaps[self.current_cmap](np.linspace(0, 1, 256)) * 255).astype(np.uint8)
                 self._pg_image_item.setLookupTable(lut[:, :3])
                 self._pg_image_item.update()
                 self.canvas_widget.update()
@@ -5082,12 +5082,10 @@ class TomoGUI(QWidget):
             self._pg_image_item.setImage(img, autoLevels=False)
             self._pg_image_item.setLevels([vmin, vmax])
             try:
-                lut = (_mpl_cm.colormaps[self.current_cmap](np.linspace(0, 1, 256)) * 255).astype(np.uint8)
+                lut = (_mpl.colormaps[self.current_cmap](np.linspace(0, 1, 256)) * 255).astype(np.uint8)
                 self._pg_image_item.setLookupTable(lut[:, :3])
             except Exception:
                 pass
-            if self._last_image_shape != (h, w):
-                self._pg_view_box.autoRange()
             self._last_image_shape = (h, w)
             return
 
@@ -5133,6 +5131,8 @@ class TomoGUI(QWidget):
         self.vmax = None
         self.min_input.clear()
         self.max_input.clear()
+        if not VISPY_AVAILABLE and hasattr(self, '_pg_view_box'):
+            self._pg_view_box.enableAutoRange()
 
     # ===== TOMOLOG METHODS =====
     def get_note_value(self):
