@@ -3493,8 +3493,9 @@ class TomoGUI(QWidget):
         self.log_output.clear()
 
     def save_log(self):
+        start_dir = self.data_path.text().strip()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_fn = f"Process_log_{timestamp}.txt"
+        log_fn = f"{start_dir}/Process_log_{timestamp}.txt"
         if os.path.exists(log_fn):
             return
         # QTextEdit isn't iterable; pull its plain text contents.
