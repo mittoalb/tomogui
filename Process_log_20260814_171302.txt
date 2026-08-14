@@ -1,6 +1,0 @@
-Start tomoGUI
-Loaded 51 COR values from rot_cen.json
-series tint applied — 51 series across 53 rows
-auto-skipped 1 file(s) with size < 50% of their series median.
-Clicked on /data2/7-BM/2026-06-Varga-1016693/monet_61389_19_A_prop420_exp0p009_correlation_0053.h5
-Loaded params for monet_61389_19_A_prop420_exp0p009_correlation_0053.h5
