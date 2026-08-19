@@ -1,237 +1,154 @@
 # tomogui — Agent Context
 
-For AI agents (pystream's Röntgen, spawned reconstruction sub-agents,
-anything else automating the beamline) that need to trigger tomographic
-reconstruction **without opening tomogui's GUI**.
+For AI agents driving tomographic reconstruction headlessly.
 
-tomogui is a Qt front-end. It builds `tomocupy` command lines and
-shells out. For headless / batch / cross-machine use, drive the same
-`tomocupy` invocations directly and reuse tomogui's existing
-persistence formats (`recon_params.json`, `~/.tomogui/machines.json`)
-so the human GUI stays in sync with what agents produce.
+## Tool-call budget rule — READ FIRST
 
-## Conda environment
+A pystream turn has ~10 tool rounds total. **Do not burn them on
+verification.** Concretely:
 
-**`tomoguiAI`** — contains `tomocupy`, `tomolog`, torch, and every
-other dep tomogui needs. Every subprocess invocation must go through
-this env; nothing in it is importable from a stock python.
+- Do NOT call `--help` / `--version` on `tomogui-cli` to "check it's
+  installed" — trust it. If it's missing you'll find out from the
+  error and can surface it.
+- Do NOT `ls`, `cat`, or `find` around the filesystem to "confirm"
+  paths the user gave you or that this doc names. Use them directly.
+- Do NOT `status --json` before every batch to check what's already
+  done — the CLI is idempotent, re-runs are cheap.
+- Do NOT re-read this doc mid-turn — you already read it once when
+  you saw `tomogui_AGENTS.md` in the initial docs sweep.
 
-Preferred invocation (works over SSH without login-shell quirks):
+**The right flow is almost always:** one tool call to run
+`tomogui-cli <action>`, one tool call to grab the output slice for
+display, done. That's two rounds. Everything else is optional.
 
-```bash
-conda run -n tomoguiAI tomocupy recon --file-name /data/scan.h5 --binning 2 ...
-```
+## The one command you almost always want
 
-Do NOT `source activate tomoguiAI` in scripts — `conda run` is cleaner
-for one-shot commands, doesn't mutate the calling shell, and is what
-tomogui itself uses under the hood.
-
-## Local vs remote
-
-If pystream and the GPU host are the same machine:
+For "reconstruct folder X on machine Y with AI":
 
 ```bash
-conda run -n tomoguiAI tomocupy recon --file-name /data/scan.h5 ...
+ssh HOST 'conda run -n tomoguiAI tomogui-cli batch \
+    --data-folder /data/session \
+    --phases ai,full \
+    --model /home/beams/USERTXM/conda/anaconda/envs/tomoguiAI/lib/python3.11/site-packages/tomogui/AImodels/datav2_518_full_finetune/epoch_10.pth \
+    --gpu 1 --json'
 ```
 
-If reconstruction runs on a different host (typical: pystream at the
-beamline console, tomocupy on a GPU node):
+That's it. One tool round. If the user didn't name a GPU, pick `1`.
+If they didn't name a model, use the path above (bundled with the
+`tomoguiAI` env). If they didn't name a machine, ask them.
 
-```bash
-ssh HOST 'conda run -n tomoguiAI tomocupy recon --file-name /data/scan.h5 ...'
-```
+## Environment
 
-The registry of usable hosts + their per-machine conda env name lives
-at `~/.tomogui/machines.json` — same file tomogui's GUI writes when
-the user configures a Machine in **Settings → Machines**. Sample:
+- Conda env: **`tomoguiAI`** (never bare python — always
+  `conda run -n tomoguiAI CMD`)
+- Machines registry: `~/.tomogui/machines.json` — `{name: {host, conda_env}}`
 
-```json
-{
-  "gpu01": {"host": "gpu01.aps.anl.gov", "conda_env": "tomoguiAI"},
-  "workstation": {"host": "localhost",   "conda_env": "tomoguiAI"}
-}
-```
+## Canonical paths (use directly; do not verify)
 
-Read this file at the start of any task that names a machine; use the
-recorded `host` for SSH and the recorded `conda_env` (usually
-`tomoguiAI`, but respect the file).
-
-## Params file — `recon_params.json`
-
-Every scan folder tomogui has touched contains a per-file dict of
-previously-used reconstruction params. Path:
-
-```
-<data_folder>/recon_params.json
-```
-
-Structure (dict keyed by full HDF5 path):
-
-```json
-{
-  "/data/scan_00042.h5": {
-    "--binning": "2",
-    "--rotation-axis-auto": "auto",
-    "--rotation-axis": "1024.5",
-    "--reconstruction-algorithm": "fourierrec",
-    "--save-format": "h5nolinks",
-    ...
-  }
-}
-```
-
-**If a scan has an entry here, USE those params** — the human
-explicitly saved them via the GUI's "Save Params" button. To override
-individual flags, mutate values in that dict; don't invent a fresh
-default set. When you finish a reconstruction on a scan that has no
-entry yet, write your params back so the human sees them next time
-they open the file in the GUI.
-
-## `recon` vs `recon_steps` (not the same flags)
-
-| capability | `recon` | `recon_steps` |
-|---|---|---|
-| standard FBP | ✅ | ✅ |
-| phase retrieval (`--retrieve-phase-*`, `--energy`, `--propagation-distance`) | ❌ | ✅ |
-| `--reconstruction-algorithm` choices | `fourierrec` / `lprec` / `linerec` | `fourierrec` / `linerec` |
-| GPU memory profile | one-pass, higher peak | staged, lower peak |
-| `--reconstruction-type try_lamino` | ❌ | ✅ |
-
-If the user mentions Paganin, phase retrieval, propagation distance,
-or asks for laminography, use `recon_steps`. Otherwise `recon`.
-
-## Reconstruction type
-
-`--reconstruction-type`:
-
-- **`try`** — reconstructs a handful of slices for preview. Fast (~30 s
-  per file). Use when finding COR or checking a new sample.
-- **`full`** — reconstructs the full volume. Slow (minutes). Use after
-  COR is dialed in and params look good.
-
-Typical pipeline for a fresh batch:
-1. `try` on every file to find CORs.
-2. `full` on every file using the CORs from step 1.
-
-## AI center-of-rotation
-
-Flag: **`--rotation-axis-method ai`**
-
-Runs a DINOv2-based classifier inside tomocupy itself — no external
-model to install; it's part of the `tomoguiAI` env. Use when the user
-says "AI method", "AI COR", or "let it find the center". Once found,
-write the discovered COR value back into `recon_params.json` for the
-subsequent `full` reconstruction to reuse.
-
-## Batch pattern
-
-Loop over `*.h5` in a folder. Track processed files in a set so
-re-walks don't repeat work.
-
-```python
-import glob, json, os, subprocess
-
-processed: set[str] = set()
-folder = "/data/scan_folder"
-host   = "gpu01.aps.anl.gov"
-env    = "tomoguiAI"
-
-while True:
-    for f in sorted(glob.glob(os.path.join(folder, "*.h5"))):
-        if f in processed:
-            continue
-        cmd = ["ssh", host, f"conda run -n {env} tomocupy recon "
-               f"--file-name {f} "
-               f"--reconstruction-type full "
-               f"--rotation-axis-method ai "
-               f"--binning 2"]
-        subprocess.run(cmd, check=True)
-        processed.add(f)
-    if acquisition_done():
-        break
-    time.sleep(5)   # let the scanner produce more files
-```
-
-## Sync with acquisition
-
-If pystream is running the scan pipeline that produces these files,
-the sub-agent has two ways to know when acquisition is done:
-
-- Poll the folder every ~5 s (above). Stop when nothing new appears
-  for a configurable idle window (e.g. 60 s with no new file).
-- Ask pystream's main agent — pass a "sync signal" via the shared
-  agent-status registry, or read a scan-status PV.
-
-Prefer polling for simplicity; reserve status-PV coupling for cases
-where the pipeline is truly latency-critical.
-
-## Tomolog (Google Slides upload)
-
-`tomolog` lives in the same `tomoguiAI` env. Uploads reconstructed
-slices to a Google Slides deck for review. tomogui's GUI runs it as
-the last stage of a batch when the user checks **Publish**.
-
-```bash
-conda run -n tomoguiAI tomolog upload \
-    --slides-url URL \
-    --file /data/recon_00042.h5
-```
-
-Slides URL is a Google Slides presentation URL (Docs → Share → Copy
-link). Auth is via a service-account JSON in `~/.tomolog/` — the user
-pre-configures this once; agents don't touch auth.
-
-## Publishing progress to the Agents panel
-
-Agents running a batch should use `AgentStatusPublisher` so the user
-sees them in pystream's **👥 Agents** window. Parent-linkage is
-automatic through the `APS_AGENT_PARENT_ID` env var pystream sets
-before spawning:
-
-```python
-from pystream.agent_status import AgentStatusPublisher, child_env
-import subprocess, glob, os
-
-with AgentStatusPublisher(
-    name="tomogui-batch", kind="worker", host="gpu01"
-) as pub:
-    files = sorted(glob.glob(f"{folder}/*.h5"))
-    for i, f in enumerate(files, start=1):
-        pub.progress(i - 1, len(files),
-                     f"recon {i}/{len(files)}: {os.path.basename(f)}")
-        subprocess.run(["ssh", host,
-                        f"conda run -n tomoguiAI tomocupy recon ..."],
-                       env={**os.environ, **child_env(pub.id)},
-                       check=True)
-    pub.finish(f"{len(files)} recons complete")
-```
-
-## Common failures and what to do
-
-| symptom | action |
+| What | Where |
 |---|---|
-| `CUDA out of memory` | retry with `--binning` bumped by 1 |
-| `cannot open display` / X errors | you tried to launch `tomogui`, not `tomocupy`. Never invoke `tomogui` headlessly. |
-| `No such file: X.h5` | acquisition hasn't produced it yet. Wait and retry. |
-| AI COR "low confidence" or fails | fall back to a `--rotation-axis` from a nearby scan's `recon_params.json` |
-| `ModuleNotFoundError: tomocupy` | env name is wrong. Verify `~/.tomogui/machines.json` and use its `conda_env` value. |
-| tomocupy hangs > 5× typical runtime | kill the ssh, log the file as failed, move on. Report at end of batch. |
+| DINOv2 model weights (default AI COR model) | `/home/beams/USERTXM/conda/anaconda/envs/tomoguiAI/lib/python3.11/site-packages/tomogui/AImodels/datav2_518_full_finetune/epoch_10.pth` |
+| Per-file tomocupy flags (dict keyed by full HDF5 path) | `<data_folder>/recon_params.json` |
+| Chosen COR per file | `<data_folder>/rot_cen.json` |
+| Try output | `<data_folder>_rec/try_center/<proj>/*.tiff` |
+| Full output (h5nolinks default) | `<data_folder>_rec/<proj>_rec.h5` |
+
+The model path is inside the tomoguiAI env's site-packages — it's
+shipped with the package, not something the user provisioned. Always
+present when `tomoguiAI` is installed.
+
+## The CLI — subcommands you'll actually use
+
+```
+tomogui-cli status <data_folder> [--json]
+tomogui-cli try <file.h5> --cor N | --auto  [--gpu N]
+tomogui-cli full <file.h5> [--cor N]  [--gpu N]
+tomogui-cli ai-cor <file.h5>  --model PATH  [--seed N]  [--gpu N]
+tomogui-cli ai-full <file.h5> --model PATH  [--seed N]  [--gpu N]
+tomogui-cli batch (--data-folder DIR | --file F ... | --files-from list.txt)
+                  --phases ai,full,tomolog,try
+                  [--model PATH] [--gpu N] [--pattern *.h5] [--json]
+tomogui-cli cor {get FILE | set FILE COR | list --data-folder DIR}
+tomogui-cli tomolog <file.h5> --url SLIDES_URL [--auto-contrast] [--gpu N]
+```
+
+Common cross-cutting flags: `--recon-way {recon,recon_steps}`
+(use `recon_steps` iff the user mentions phase / Paganin),
+`--extra "flags"` for passthrough tomocupy flags,
+`--quiet` to capture output rather than stream it.
+
+`--json` is available on `status`, `cor get`, `cor list`, `ai-cor`,
+`ai-full`, `batch` — prefer it, parse it directly.
+
+## Showing a reconstructed slice back to the user
+
+After a batch/full finishes, the output is `<data_folder>_rec/<proj>_rec.h5`
+with dataset `/exchange/data` (or `/exchange/recon`). One tool round:
+
+```bash
+ssh HOST 'conda run -n tomoguiAI python -c "
+import h5py, numpy as np, tifffile
+with h5py.File(\"/data/session_rec/scan0001_rec.h5\") as f:
+    a = f[\"/exchange/data\"]
+    mid = a.shape[0] // 2
+    slice_ = a[mid]
+tifffile.imwrite(\"/tmp/mid_slice.tiff\", slice_)
+print(f\"mid={mid} shape={slice_.shape} range=[{slice_.min()},{slice_.max()}]\")
+"'
+```
+
+Then either scp it back and show with `view_detector_image`-style
+tools, or just report the range/shape in text.
+
+## Python API (in-process alternative)
+
+```python
+from tomogui import headless as H
+
+sess = H.Session(
+    data_folder="/data/session",
+    model_path="/home/beams/USERTXM/conda/anaconda/envs/tomoguiAI/lib/python3.11/site-packages/tomogui/AImodels/datav2_518_full_finetune/epoch_10.pth",
+    gpu=1,
+)
+H.run_batch(H.list_h5(sess.data_folder), sess, phases=("ai", "full"))
+```
+
+Use when you're already inside `tomoguiAI` python. For SSH-driven
+work, the CLI is simpler.
+
+## Failure handling — no retries, no verification, one report
+
+| symptom | do this |
+|---|---|
+| non-zero exit + JSON has `error` field | quote the error to the user, ask what to do, STOP |
+| stderr says `--model` file missing | check the canonical path above; if it's still missing, surface + STOP |
+| stderr says `CUDA out of memory` | retry ONCE with `--extra "--binning 2"`. If still fails, STOP |
+| `No such file: X.h5` | acquisition hasn't finished — tell the user, STOP |
+| any other error | surface verbatim, STOP. Do not loop trying to diagnose |
+
+"STOP" means: return control to the user with a one-sentence summary
+of what happened. Do NOT burn tool rounds re-checking things.
+
+## When the user says "reconstruct" — the decision tree
+
+1. Did they name a folder? → yes, use it. no, ask.
+2. Did they name a machine? → yes, use `~/.tomogui/machines.json`.
+   No, ask (unless the CLI is available locally).
+3. Did they say "AI" / "auto" / "find center"? → phases = `ai,full`.
+   Otherwise phases = `full` (needs COR in rot_cen.json).
+4. Run the one `tomogui-cli batch` command above.
+5. Optionally: extract one middle slice from one output file and
+   report shape+range OR display it.
+
+That's the whole workflow. If you find yourself on tool round 5+
+without having called `tomogui-cli batch` yet, you're on the wrong
+track — stop, tell the user what you tried, and ask them to clarify.
 
 ## What NOT to do
 
-- Do NOT launch `tomogui` for a headless run. It's a Qt app; it needs
-  a display. Drive `tomocupy` directly.
-- Do NOT modify `recon_params.json` for files you're not currently
-  processing — the human may be editing them via the GUI.
-- Do NOT install additional packages into `tomoguiAI` — it's the
-  user's curated env. Report missing deps back instead.
-- Do NOT retry indefinitely on failure. Two attempts max per file,
-  then log + skip + report at end.
-
-## Quick smoke test (verify env before dispatch)
-
-```bash
-ssh HOST 'conda run -n tomoguiAI tomocupy --version'
-```
-
-If this succeeds you can dispatch reconstructions to that host.
+- Never launch `tomogui` (bare) headlessly — it's the GUI, needs display.
+- Never `find /` or `find /home` for weights — use the canonical path.
+- Never `--help` a CLI to see what flags it takes — this doc is the reference.
+- Never re-read `~/.pystream/docs/tomogui_AGENTS.md` mid-turn — you already have it.
+- Never install packages into `tomoguiAI` — report missing deps, STOP.
+- Never retry a failed reconstruction more than once. Second failure → STOP.

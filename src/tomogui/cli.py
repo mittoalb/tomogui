@@ -281,6 +281,201 @@ def cmd_cor_list(args) -> int:
     return 0
 
 
+def _parse_index_spec(spec: str, n: int) -> list[int]:
+    """Turn a slice spec string into a sorted, deduped, in-range index list.
+
+    Accepts:
+      * ``A``            → single index
+      * ``A,B,C``        → explicit list
+      * ``A:B``          → half-open range [A, B)
+      * ``A:B:S``        → range with step S
+      * ``every:N``      → every Nth slice, offset 0
+      * ``mid``          → single mid-slice
+      * ``all``          → all slices
+    Negative indices count from the end.
+    """
+    def _norm(i):
+        i = int(i)
+        if i < 0:
+            i += n
+        return i
+
+    out: list[int] = []
+    spec = spec.strip()
+    if spec in ("", "mid"):
+        return [n // 2]
+    if spec == "all":
+        return list(range(n))
+    if spec.startswith("every:"):
+        step = max(1, int(spec.split(":", 1)[1]))
+        return list(range(0, n, step))
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" in part:
+            bits = part.split(":")
+            a = _norm(bits[0]) if bits[0] else 0
+            b = _norm(bits[1]) if len(bits) > 1 and bits[1] else n
+            s = int(bits[2]) if len(bits) > 2 and bits[2] else 1
+            out.extend(range(a, b, s))
+        else:
+            out.append(_norm(part))
+    # sort + dedupe + clip
+    return sorted({i for i in out if 0 <= i < n})
+
+
+def cmd_view(args) -> int:
+    """Extract slices from any reconstruction (H5 or TIFF) as PNGs, print
+    stats, or open an interactive viewer."""
+    df = getattr(args, "data_folder", None) or _infer_data_folder(args.target) \
+        if os.path.isfile(args.target) else None
+    try:
+        vol = H.Volume.open(args.target, data_folder=df)
+    except FileNotFoundError as exc:
+        _die(str(exc), code=1)
+    try:
+        # Info / stats
+        if args.info:
+            info = {
+                "source": vol.source, "kind": vol.kind,
+                "n_slices": vol.n_slices, "shape": list(vol.shape),
+            }
+            if args.stats:
+                info["stats"] = vol.stats(
+                    idx=(args.slice if args.slice is not None else None))
+            _emit(info, as_json=args.json)
+            return 0
+
+        # Interactive Qt slider window
+        if args.interactive:
+            return _run_interactive_viewer(vol, args)
+
+        # Slice extraction / export
+        indices = _parse_index_spec(args.slices or ("mid" if args.slice is None
+                                                    else str(args.slice)), vol.n_slices)
+        if not indices:
+            _die("no slices selected — check --slices / --slice", code=1)
+
+        render_kwargs = dict(
+            vmin=args.vmin, vmax=args.vmax, cmap=args.cmap,
+            pct=(args.pct_lo, args.pct_hi),
+        )
+
+        # Single-slice → single file (or stdout if --out is '-')
+        out = args.out
+        if len(indices) == 1 and (out is None or not os.path.isdir(out or "")
+                                  and (out is None or not out.endswith("/"))):
+            arr = vol[indices[0]]
+            if out is None:
+                # Default: print stats to stderr, PNG to stdout as raw bytes
+                _die("--out is required (path or '-' for stdout)", code=2)
+            if out == "-":
+                # Write PNG bytes to stdout
+                from io import BytesIO
+                from PIL import Image
+                rgb = H.render_slice(arr, **render_kwargs)
+                buf = BytesIO()
+                Image.fromarray(rgb, mode="RGB").save(buf, format="PNG")
+                sys.stdout.buffer.write(buf.getvalue())
+                return 0
+            os.makedirs(os.path.dirname(os.path.abspath(out)) or ".",
+                        exist_ok=True)
+            H.save_slice_png(arr, out, **render_kwargs)
+            if not args.quiet:
+                print(f"wrote {out} (slice {indices[0]})", file=sys.stderr)
+            return 0
+
+        # Multi-slice → directory
+        if out is None:
+            _die("--out DIR is required when extracting multiple slices",
+                 code=2)
+        os.makedirs(out, exist_ok=True)
+        pad = len(str(vol.n_slices - 1))
+        for i in indices:
+            fp = os.path.join(out, f"slice_{i:0{pad}d}.png")
+            H.save_slice_png(vol[i], fp, **render_kwargs)
+        if not args.quiet:
+            print(f"wrote {len(indices)} slice(s) to {out}", file=sys.stderr)
+        return 0
+    finally:
+        vol.close()
+
+
+def _run_interactive_viewer(vol: "H.Volume", args) -> int:
+    """Launch the real tomogui GUI and drop the user straight into the
+    viewer for this volume. We deliberately reuse the shipped viewer widget
+    (VisPy / PyQtGraph, contrast box, cmap picker, slice slider, ROI, save)
+    rather than reimplementing a lesser copy in the CLI.
+    """
+    try:
+        from PyQt5.QtWidgets import QApplication
+    except ImportError as e:
+        _die(f"interactive viewer requires PyQt5: {e}", code=1)
+    from .gui import TomoGUI
+
+    # Figure out the data folder and highlighted scan the GUI needs to point
+    # at. For H5-full-recon or TIFF-full-recon volumes we still need the
+    # source projection H5 so the row highlight and View Full trigger work.
+    if vol.kind == "h5" and vol.source.endswith("_rec.h5"):
+        proj_stem = os.path.basename(vol.source)[:-len("_rec.h5")]
+        data_folder = os.path.dirname(os.path.dirname(vol.source)).rstrip("/")
+        # strip trailing _rec if data_folder was …_rec
+        if data_folder.endswith("_rec"):
+            data_folder = data_folder[:-4]
+        proj_file = os.path.join(data_folder, f"{proj_stem}.h5")
+        view_mode = "full"
+    elif vol.kind == "tiff":
+        # source is …/{proj}_rec
+        parent = os.path.dirname(vol.source)
+        proj_stem = os.path.basename(vol.source)[:-len("_rec")] \
+            if vol.source.endswith("_rec") else os.path.basename(vol.source)
+        data_folder = parent[:-4] if parent.endswith("_rec") else parent
+        proj_file = os.path.join(data_folder, f"{proj_stem}.h5")
+        view_mode = "full"
+    elif vol.kind == "try":
+        # source is …/try_center/{proj}
+        proj_stem = os.path.basename(vol.source)
+        data_folder = os.path.dirname(os.path.dirname(vol.source))
+        if data_folder.endswith("_rec"):
+            data_folder = data_folder[:-4]
+        proj_file = os.path.join(data_folder, f"{proj_stem}.h5")
+        view_mode = "try"
+    else:
+        # Source projection H5 given directly; assume caller wants Full recon.
+        data_folder = os.path.dirname(os.path.abspath(vol.source))
+        proj_file = vol.source
+        view_mode = "full"
+
+    # Close our own H5 handle before the GUI opens the same file.
+    vol.close()
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    gui = TomoGUI()
+    gui.show()
+    # Point the GUI at the folder + row, then trigger the built-in viewer.
+    try:
+        gui.data_path.setText(data_folder)
+        # Populate the table (the GUI has a helper triggered by set/browse).
+        if hasattr(gui, "read_h5_files"):
+            gui.read_h5_files()
+        # Highlight the requested scan
+        for row, fi in enumerate(getattr(gui, "batch_file_main_list", [])):
+            if fi.get("path") == proj_file:
+                gui.highlight_scan = proj_file
+                gui.highlight_row = row
+                break
+        if view_mode == "full":
+            gui.view_full_reconstruction()
+        else:
+            gui.view_try_reconstruction()
+    except Exception as exc:
+        print(f"tomogui-cli: could not auto-drive the GUI ({exc}); the "
+              f"window is still open — pick the file manually.",
+              file=sys.stderr)
+    return app.exec_()
+
+
 def cmd_tomolog(args) -> int:
     session = _make_session(args)
     rc = H.run_tomolog(
@@ -430,6 +625,50 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("--data-folder", required=True)
     cl.add_argument("--json", action="store_true")
     cl.set_defaults(func=cmd_cor_list)
+
+    # view
+    s = sub.add_parser(
+        "view",
+        help="Show slices of a reconstruction (H5 or TIFF stack). Extract "
+             "PNGs headlessly, print stats, or launch the shipped GUI viewer.",
+    )
+    s.add_argument("target",
+                   help="Path to a source projection .h5 (resolves the full "
+                        "recon), a full-recon .h5, a TIFF-stack dir, or a "
+                        "try_center dir.")
+    src = s.add_mutually_exclusive_group()
+    src.add_argument("--slice", type=int,
+                     help="Single slice index (negative counts from end)")
+    src.add_argument("--slices", default=None,
+                     help='Slice selector: "A", "A,B,C", "A:B", "A:B:S", '
+                          '"every:N", "mid" (default), or "all"')
+    s.add_argument("--out", default=None,
+                   help="Output PNG path for a single slice, or output "
+                        "directory for multiple slices. Use '-' to write "
+                        "PNG bytes to stdout (single slice only).")
+    s.add_argument("--vmin", type=float, default=None)
+    s.add_argument("--vmax", type=float, default=None)
+    s.add_argument("--pct-lo", type=float, default=5.0,
+                   help="Lower percentile for autoscale (default 5)")
+    s.add_argument("--pct-hi", type=float, default=95.0,
+                   help="Upper percentile for autoscale (default 95)")
+    s.add_argument("--cmap", default="gray",
+                   help="Matplotlib colormap (default: gray)")
+    s.add_argument("--info", action="store_true",
+                   help="Print volume metadata (kind, shape, n_slices) "
+                        "instead of extracting")
+    s.add_argument("--stats", action="store_true",
+                   help="With --info, add min/max/mean/percentiles")
+    s.add_argument("--interactive", action="store_true",
+                   help="Launch the full tomogui GUI focused on this file "
+                        "(reuses the shipped viewer — VisPy/PyQtGraph, "
+                        "contrast/cmap controls, ROI, save PNG).")
+    s.add_argument("--data-folder", default=None,
+                   help="Explicit data folder (only needed when TARGET is a "
+                        "source .h5 whose parent isn't the data folder)")
+    s.add_argument("--json", action="store_true")
+    s.add_argument("--quiet", action="store_true")
+    s.set_defaults(func=cmd_view)
 
     # tomolog
     s = sub.add_parser("tomolog", help="Upload a reconstruction to tomolog")

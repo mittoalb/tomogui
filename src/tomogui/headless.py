@@ -614,6 +614,208 @@ def run_tomolog(proj_file: str, session: Session, *,
 # Convenience for external agents
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Volume abstraction — uniform read for H5 and TIFF-stack reconstructions.
+# ---------------------------------------------------------------------------
+
+class Volume:
+    """Uniform slice-reader over a reconstruction.
+
+    ``Volume`` hides the H5 / TIFF / try-center distinction from callers.
+    Use as an iterator (``for arr in vol``) or by index (``vol[k]``); call
+    ``vol.close()`` when done (H5 backend holds a file handle). Supports
+    ``with`` statements.
+
+    Attributes:
+        kind       — 'h5' | 'tiff' | 'try'
+        n_slices   — number of frames
+        shape      — (n_slices, height, width) tuple
+        source     — path of the file/dir the volume was opened from
+    """
+
+    def __init__(self, kind: str, source: str, *, n_slices: int,
+                 shape: tuple, _h5=None, _tiffs=None):
+        self.kind = kind
+        self.source = source
+        self.n_slices = int(n_slices)
+        self.shape = shape
+        self._h5 = _h5
+        self._tiffs = _tiffs
+
+    @classmethod
+    def open(cls, target: str, *, data_folder: str | None = None) -> "Volume":
+        """Open a reconstruction volume.
+
+        ``target`` can be:
+          * a source projection H5 (``.../scan0001.h5``) — resolves the full
+            recon via :func:`resolve_full_recon`; if none exists, falls back
+            to the try-center TIFF stack for that scan.
+          * a full-recon H5 (``.../scan0001_rec.h5``) — opened directly.
+          * a directory of TIFF slices (``.../scan0001_rec``) — opened as
+            a stack.
+          * an explicit ``center_of_rotation``-style try_center dir.
+
+        ``data_folder`` is only needed when resolving via a source projection
+        file whose parent isn't the data folder.
+        """
+        target = os.path.abspath(target)
+        # Direct H5 file
+        if os.path.isfile(target) and target.endswith(".h5"):
+            # Distinguish "source projection" (has /exchange/data with N proj)
+            # from "full recon" (also /exchange/data but interpreted as z,y,x)
+            # by looking at siblings: source H5 lives next to the data folder;
+            # a *_rec.h5 or *_rec_parts/ pattern → reconstruction file.
+            if target.endswith("_rec.h5") or os.path.isdir(target[:-3] + "_parts"):
+                return cls._open_h5(target)
+            df = data_folder or os.path.dirname(target)
+            info = resolve_full_recon(df, target)
+            if info["kind"] == "h5":
+                return cls._open_h5(info["h5_path"])
+            if info["kind"] == "tiff":
+                return cls._open_tiff_list(info["tiff_files"],
+                                           source=full_tiff_dir_of(df, target))
+            # Fall back to try_center for this file
+            tdir = try_dir_of(df, target)
+            tiffs = sorted(glob.glob(os.path.join(tdir, "*.tiff")))
+            if tiffs:
+                return cls._open_tiff_list(tiffs, source=tdir, kind="try")
+            raise FileNotFoundError(
+                f"no reconstruction (h5 or tiff) or try_center TIFFs for "
+                f"{target}")
+        # Directory of TIFFs
+        if os.path.isdir(target):
+            tiffs = sorted(glob.glob(os.path.join(target, "*.tiff")))
+            if not tiffs:
+                raise FileNotFoundError(f"no .tiff files under {target}")
+            kind = "try" if os.path.basename(os.path.dirname(target)) == "try_center" else "tiff"
+            return cls._open_tiff_list(tiffs, source=target, kind=kind)
+        raise FileNotFoundError(target)
+
+    @classmethod
+    def _open_h5(cls, path: str) -> "Volume":
+        try:
+            fh = h5py.File(path, "r", locking=False)
+        except (TypeError, ValueError):
+            fh = h5py.File(path, "r")
+        dset = fh["/exchange/data"]
+        return cls("h5", path, n_slices=int(dset.shape[0]),
+                   shape=tuple(int(x) for x in dset.shape), _h5=fh)
+
+    @classmethod
+    def _open_tiff_list(cls, tiffs: list[str], *, source: str,
+                        kind: str = "tiff") -> "Volume":
+        from PIL import Image
+        with Image.open(tiffs[0]) as im:
+            arr = np.array(im)
+        h, w = arr.shape[-2:]
+        return cls(kind, source, n_slices=len(tiffs),
+                   shape=(len(tiffs), h, w), _tiffs=tiffs)
+
+    # ---- slice access -----------------------------------------------------
+
+    def __len__(self) -> int:
+        return self.n_slices
+
+    def __getitem__(self, idx: int) -> np.ndarray:
+        idx = self._normalize_index(idx)
+        if self.kind == "h5":
+            return np.asarray(self._h5["/exchange/data"][idx, :, :])
+        from PIL import Image
+        with Image.open(self._tiffs[idx]) as im:
+            arr = np.array(im)
+        return arr[..., 0] if arr.ndim == 3 else arr
+
+    def _normalize_index(self, idx: int) -> int:
+        if not isinstance(idx, (int, np.integer)):
+            raise TypeError(f"slice index must be int, got {type(idx).__name__}")
+        n = self.n_slices
+        if idx < 0:
+            idx += n
+        if not (0 <= idx < n):
+            raise IndexError(f"slice {idx} out of range 0..{n - 1}")
+        return int(idx)
+
+    def __iter__(self):
+        for i in range(self.n_slices):
+            yield self[i]
+
+    def close(self) -> None:
+        if self._h5 is not None:
+            try:
+                self._h5.close()
+            except OSError:
+                pass
+            self._h5 = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    # ---- convenience helpers ---------------------------------------------
+
+    def middle_slice(self) -> np.ndarray:
+        return self[self.n_slices // 2]
+
+    def stats(self, idx: int | None = None) -> dict:
+        """Basic stats for one slice, or a size-limited sample of the volume.
+        ``idx=None`` samples up to 32 evenly-spaced slices to keep memory
+        bounded even on huge volumes."""
+        if idx is not None:
+            arr = self[idx].astype(np.float32, copy=False)
+        else:
+            step = max(1, self.n_slices // 32)
+            picks = list(range(0, self.n_slices, step))[:32]
+            arr = np.stack([self[i].astype(np.float32, copy=False)
+                            for i in picks], axis=0)
+        return {
+            "shape": tuple(arr.shape),
+            "min": float(np.nanmin(arr)),
+            "max": float(np.nanmax(arr)),
+            "mean": float(np.nanmean(arr)),
+            "p1": float(np.percentile(arr, 1)),
+            "p5": float(np.percentile(arr, 5)),
+            "p50": float(np.percentile(arr, 50)),
+            "p95": float(np.percentile(arr, 95)),
+            "p99": float(np.percentile(arr, 99)),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Slice rendering (headless PNG export)
+# ---------------------------------------------------------------------------
+
+def render_slice(arr: np.ndarray, *, vmin: float | None = None,
+                 vmax: float | None = None, cmap: str = "gray",
+                 pct: tuple[float, float] | None = (5.0, 95.0)) -> np.ndarray:
+    """Turn a raw slice into an 8-bit RGB image ready for PNG writing.
+
+    When ``vmin`` / ``vmax`` are None, uses ``pct`` (default 5/95 percentile)
+    to autoscale. ``cmap`` is any matplotlib colormap name; falls back to
+    grayscale if matplotlib isn't importable.
+    """
+    arr = arr.astype(np.float32, copy=False)
+    lo = float(vmin) if vmin is not None else float(np.percentile(arr, pct[0]))
+    hi = float(vmax) if vmax is not None else float(np.percentile(arr, pct[1]))
+    if hi <= lo:
+        hi = lo + 1.0
+    norm = np.clip((arr - lo) / (hi - lo), 0.0, 1.0)
+    try:
+        import matplotlib.cm as mcm
+        table = (mcm.get_cmap(cmap)(norm) * 255.0).astype(np.uint8)
+        return table[..., :3]
+    except Exception:
+        g = (norm * 255.0).astype(np.uint8)
+        return np.stack([g, g, g], axis=-1)
+
+
+def save_slice_png(arr: np.ndarray, out_path: str, **render_kwargs) -> None:
+    from PIL import Image
+    rgb = render_slice(arr, **render_kwargs)
+    Image.fromarray(rgb, mode="RGB").save(out_path, format="PNG")
+
+
 def status(session: Session, pattern: str = "*.h5") -> list[dict]:
     """Return a JSON-serialisable status list for every H5 in the session's
     data folder — reconstruction state + current COR value if any."""
