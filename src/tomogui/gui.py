@@ -150,7 +150,7 @@ class MachineSettingsDialog(QDialog):
         info = QLabel(
             "Configure remote machines for batch reconstruction.\n"
             "Leave username empty to use current system username.\n"
-          "Conda environment defaults to 'tomocupy' if not specified."
+          "Conda environment defaults to 'tomoguiAI' if not specified."
         )
         info.setWordWrap(True)
         layout.addWidget(info)
@@ -165,7 +165,7 @@ class MachineSettingsDialog(QDialog):
             machine_config = self.config.get(machine, {})
             username = machine_config.get("username", "")
             hostname = machine_config.get("hostname", machine)
-            conda_env = machine_config.get("conda_env", "tomocupy")
+            conda_env = machine_config.get("conda_env", "tomoguiAI")
 
             # Create row widget
             row = QWidget()
@@ -181,7 +181,7 @@ class MachineSettingsDialog(QDialog):
             host_input.setFixedWidth(150)
 
             conda_input = QLineEdit(conda_env)
-            conda_input.setPlaceholderText("tomocupy")
+            conda_input.setPlaceholderText("tomoguiAI")
             conda_input.setFixedWidth(100)
 
             row_layout.addWidget(QLabel("User:"))
@@ -225,7 +225,7 @@ class MachineSettingsDialog(QDialog):
                 config[machine] = {
                     "username": username or os.getenv("USER", ""),
                     "hostname": hostname,
-                    "conda_env": conda_env or "tomocupy"
+                    "conda_env": conda_env or "tomoguiAI"
                 }
         return config
 
@@ -4516,7 +4516,7 @@ class TomoGUI(QWidget):
         machine_config = self.machine_config.get(machine, {})
         username = machine_config.get("username", os.getenv("USER", ""))
         hostname = machine_config.get("hostname", machine)
-        conda_env = machine_config.get("conda_env", "tomocupy")
+        conda_env = machine_config.get("conda_env", "tomoguiAI")
 
         # Build SSH target
         if username:
