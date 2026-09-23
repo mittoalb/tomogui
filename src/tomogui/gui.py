@@ -2240,10 +2240,13 @@ class TomoGUI(QWidget):
         host_layout.addLayout(split_row)
         host_layout.addStretch(1)
 
-        _default_ai_model = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "AImodels", "datav2_518_full_finetune", "epoch_10.pth",
-        )
+        # Site-default FINE checkpoint (fine_v2.pt shipped with the tomoguiAI
+        # conda env at USERTXM). FULL has no shipped weights yet, so its field
+        # is left blank until the user picks one.
+        _default_fine_model = ("/home/beams/USERTXM/conda/anaconda/envs/"
+                               "tomoguiAI/lib/python3.11/site-packages/"
+                               "tomogui/AImodels/fine_v2.pt")
+        _default_full_model = ""
 
         def make_helpers(form):
             """Return (add_line, add_combo, add_check, add_spin, add_path) that
@@ -2372,7 +2375,7 @@ class TomoGUI(QWidget):
 
         # ---- FINE (--infer-*) column ------------------------------------
         self.ai_infer_model_path = add_path_f(
-            "--infer-model-path", default_text=_default_ai_model,
+            "--infer-model-path", default_text=_default_fine_model,
             placeholder="Path to FINE model weights (.pth/.pt)",
             tip="Path to the FINE model checkpoint used by the "
                 "single-stage inference_pipeline (fine search mode).")
@@ -2405,10 +2408,11 @@ class TomoGUI(QWidget):
 
         # ---- FULL (--bin-infer-*) column --------------------------------
         self.ai_bin_infer_model_path = add_path_b(
-            "--bin-infer-model-path", default_text=_default_ai_model,
-            placeholder="Path to FULL model weights (.pth/.pt)",
+            "--bin-infer-model-path", default_text=_default_full_model,
+            placeholder="Path to FULL model weights (.pth/.pt) — none shipped yet",
             tip="Path to the FULL model checkpoint used by the two-stage "
-                "bin_inference_pipeline (full search mode).")
+                "bin_inference_pipeline (full search mode). No default is "
+                "shipped yet; leave blank until a full model is provided.")
         add_line_b("--bin-infer-bin-sizes",
                    placeholder="[24,12]",
                    tip="Pixel step per bin per refinement stage.")
@@ -4520,12 +4524,12 @@ class TomoGUI(QWidget):
         else:
             ssh_target = hostname
 
-        # Build command with conda activation
-        # Properly quote arguments for shell execution
-            remote_cmd = " ".join([f'"{str(arg)}"' if " " in str(arg) else str(arg) for arg in cmd])
+        # Build command with conda activation.
+        # Properly quote arguments for shell execution.
+        remote_cmd = " ".join([f'"{str(arg)}"' if " " in str(arg) else str(arg) for arg in cmd])
 
-        # Wrap command with conda activation
-            full_cmd = f"bash -l -c 'source ~/.bashrc && conda activate {conda_env} && {remote_cmd}'"
+        # Wrap command with conda activation.
+        full_cmd = f"bash -l -c 'source ~/.bashrc && conda activate {conda_env} && {remote_cmd}'"
 
         # Use SSH with terminal (-t) to execute the command on the remote machine
         # -t forces pseudo-terminal allocation for better output handling
