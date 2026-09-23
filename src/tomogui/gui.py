@@ -381,33 +381,17 @@ class TomoGUI(QWidget):
         single_ops.addWidget(clear_log_btn)
         main_tab.addLayout(single_ops)
 
-        # Row 1b - Try AI (tomocor inference)
+        # Row 1b - Try AI (tomocor inference). The AI model paths live on the
+        # AI COR tab (fine + full each own a --*-model-path field there); this
+        # row only exposes the launch button so the top area stays uncluttered.
         ai_ops = QHBoxLayout()
         ai_ops.setSpacing(6)
-        ai_model_label = QLabel("AI Model:")
-        ai_model_label.setStyleSheet("QLabel { font-size: 10.5pt; }")
-        ai_ops.addWidget(ai_model_label)
-        _default_ai_model = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "AImodels", "datav2_518_full_finetune", "epoch_10.pth",
-        )
-        self.ai_model_path = QLineEdit(_default_ai_model)
-        self.ai_model_path.setPlaceholderText("Path to model weights (.pth/.pt)")
-        self.ai_model_path.setStyleSheet("QLineEdit { font-size: 10pt; }")
-        ai_ops.addWidget(self.ai_model_path, 1)
-        def _browse_ai_model():
-            fn, _ = QFileDialog.getOpenFileName(self, "Select model weights", "", "Model files (*.pth *.pt);;All files (*)")
-            if fn:
-                self.ai_model_path.setText(fn)
-        ai_browse_btn = QPushButton("Browse")
-        ai_browse_btn.setStyleSheet("QPushButton { font-size: 10pt; }")
-        ai_browse_btn.setFixedWidth(65)
-        ai_browse_btn.clicked.connect(_browse_ai_model)
-        ai_ops.addWidget(ai_browse_btn)
+        ai_ops.addStretch(1)
         try_ai_btn = QPushButton("  AI Reco  ")
         try_ai_btn.setStyleSheet("QPushButton { font-size: 11pt; font-weight:bold; color: #1a8cff; }")
         try_ai_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        try_ai_btn.setToolTip("Run Try reconstruction, find best COR via AI, then run Full reconstruction")
+        try_ai_btn.setToolTip("Run Try reconstruction, find best COR via AI, then run Full reconstruction.\n"
+                              "Model paths are configured on the AI COR tab.")
         try_ai_btn.clicked.connect(self.try_ai_reconstruction)
         ai_ops.addWidget(try_ai_btn)
         main_tab.addLayout(ai_ops)
@@ -1211,28 +1195,48 @@ class TomoGUI(QWidget):
 
     def _ai_cor_args(self, ai_search_method="fine"):
         """Return tomocupy CLI flags that turn on its built-in AI COR finder
-        for a `try` reconstruction. Returns [] when the AI model path is not
-        set — callers then fall back to whatever COR method they were using.
+        for a `try` reconstruction. Returns [] when the required AI model
+        path(s) for the selected search method are not set — callers then
+        fall back to whatever COR method they were using.
 
         Tomocupy runs the try recon and the AI center search in a single
         subprocess and writes ``center_of_rotation.txt`` inside the try
         output directory (``{data}_rec/try_center/{proj}/``).
 
-        Both ``--infer-model-path`` and ``--bin-infer-model-path`` are set to
-        the same file: ``full`` mode runs the two-stage bin refinement
-        (reads ``bin_infer_model_path``) and THEN a final ``run_rec`` that
+        The actual ``--infer-model-path`` / ``--bin-infer-model-path`` flags
+        are emitted by _gather_ai_args (they live on the AI tab now), so
+        this method only returns the mode-switching flags. In ``full`` mode
+        both model paths must be set: full runs the two-stage bin refinement
+        (reads ``bin_infer_model_path``) and then a final ``run_rec`` that
         internally calls ``_find_center_ai`` (reads ``infer_model_path``).
-        Passing only one flag makes ``full`` crash on the second call.
         """
-        model_path = self.ai_model_path.text().strip()
-        if not model_path or not os.path.exists(model_path):
+        if not self._ai_model_paths_ok(ai_search_method):
             return []
         return [
             "--rotation-axis-method", "ai",
             "--ai-search-method", ai_search_method,
-            "--infer-model-path", model_path,
-            "--bin-infer-model-path", model_path,
         ]
+
+    def _ai_model_paths_ok(self, ai_search_method=None):
+        """True when the model path(s) required for the given search method
+        exist on disk. Fine needs --infer-model-path. Full needs BOTH
+        --bin-infer-model-path and --infer-model-path (the final run_rec
+        stage of full still calls _find_center_ai)."""
+        if ai_search_method is None:
+            ai_search_method = self._current_ai_search_method()
+        infer = self.ai_infer_model_path.text().strip()
+        binfer = self.ai_bin_infer_model_path.text().strip()
+        if ai_search_method == "full":
+            return (bool(binfer) and os.path.exists(binfer)
+                    and bool(infer) and os.path.exists(infer))
+        return bool(infer) and os.path.exists(infer)
+
+    def _current_ai_model_path(self):
+        """Return the path string of the model that drives the current
+        search method (for display / validation messages)."""
+        if self._current_ai_search_method() == "full":
+            return self.ai_bin_infer_model_path.text().strip()
+        return self.ai_infer_model_path.text().strip()
 
     def _read_ai_cor_from_try_dir(self, proj_file):
         """Read the last value written to center_of_rotation.txt inside the
@@ -2175,183 +2179,279 @@ class TomoGUI(QWidget):
 
 # ===== AI COR TAB =====
     def _build_ai_tab(self):
-        """AI COR settings tab. Exposes tomocupy's --infer-* (fine mode) and
-        --bin-infer-* (full/bin mode) inference parameters. The tab also owns
-        the --ai-search-method selector, which _apply_ai_cor reads to decide
-        which pipeline flag family to pass through."""
+        """AI COR settings tab. Two columns side-by-side:
+          - Left  = FINE model  (--infer-*)
+          - Right = FULL model  (--bin-infer-*)
+
+        Each column owns its own --*-model-path field (previously a single
+        shared field on the Main tab). The --ai-search-method selector at
+        the top decides which column drives _apply_ai_cor."""
         ai_tab = QWidget()
         outer = QVBoxLayout(ai_tab)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        form_host = QWidget()
-        form = QFormLayout(form_host)
-        scroll.setWidget(form_host)
+        host = QWidget()
+        host_layout = QVBoxLayout(host)
+        host_layout.setContentsMargins(6, 6, 6, 6)
+        scroll.setWidget(host)
         outer.addWidget(scroll)
 
         self.ai_widgets = {}
 
-        def _add_row(flag, kind, w, default=None, label_text=None, include=True):
-            label_text = label_text or flag
-            label_widget = QWidget()
-            h = QHBoxLayout(label_widget)
-            h.setContentsMargins(0, 0, 0, 0)
-            h.setSpacing(6)
-            lbl = QLabel(label_text)
-            include_cb = None
-            if include:
-                include_cb = QCheckBox()
-                include_cb.setChecked(False)
-                h.addWidget(include_cb)
-                lbl.setEnabled(False)
-                w.setEnabled(False)
+        # Header: search-method selector (always sent).
+        header_row = QHBoxLayout()
+        header_row.setSpacing(8)
+        method_label = QLabel("--ai-search-method")
+        method_label.setStyleSheet("QLabel { font-weight: bold; }")
+        header_row.addWidget(method_label)
+        method_combo = QComboBox()
+        method_combo.addItems(["fine", "full"])
+        method_combo.setCurrentText("fine")
+        method_combo.setToolTip(
+            "fine: single-stage inference_pipeline (uses FINE model only).\n"
+            "full: two-stage bin_inference_pipeline (uses FULL model, "
+            "then falls back to FINE model for the final stage).")
+        header_row.addWidget(method_combo)
+        header_row.addStretch(1)
+        host_layout.addLayout(header_row)
+        # Register directly (no include checkbox) so _gather_ai_args emits it.
+        self.ai_widgets["--ai-search-method"] = ("combo", method_combo, None, "fine")
 
-                def on_toggle(checked):
-                    lbl.setEnabled(checked)
-                    w.setEnabled(checked)
-                    if not checked:
-                        if kind in ("spin", "dspin") and default is not None:
-                            w.blockSignals(True)
-                            w.setValue(default)
-                            w.blockSignals(False)
-                        elif kind == "combo":
-                            if default is not None:
-                                w.setCurrentText(str(default))
-                            else:
-                                w.setCurrentIndex(0)
-                        elif kind == "line":
-                            w.clear()
-                        elif kind == "check":
-                            w.setChecked(False)
+        # Split: two group boxes side-by-side.
+        split_row = QHBoxLayout()
+        split_row.setSpacing(10)
+        fine_group = QGroupBox("FINE model  (--infer-*)")
+        full_group = QGroupBox("FULL model  (--bin-infer-*)")
+        fine_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        full_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        fine_outer = QVBoxLayout(fine_group)
+        full_outer = QVBoxLayout(full_group)
+        fine_form_host = QWidget()
+        full_form_host = QWidget()
+        fine_form = QFormLayout(fine_form_host)
+        full_form = QFormLayout(full_form_host)
+        fine_form.setLabelAlignment(Qt.AlignLeft)
+        full_form.setLabelAlignment(Qt.AlignLeft)
+        fine_outer.addWidget(fine_form_host)
+        full_outer.addWidget(full_form_host)
+        split_row.addWidget(fine_group, 1)
+        split_row.addWidget(full_group, 1)
+        host_layout.addLayout(split_row)
+        host_layout.addStretch(1)
 
-                include_cb.toggled.connect(on_toggle)
-            else:
-                lbl.setEnabled(True)
-                w.setEnabled(True)
-            h.addWidget(lbl)
-            h.addStretch(1)
-            form.addRow(label_widget, w)
-            self.ai_widgets[flag] = (kind, w, include_cb, default)
+        _default_ai_model = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "AImodels", "datav2_518_full_finetune", "epoch_10.pth",
+        )
 
-        def add_line(flag, placeholder="", tip="", width=240, include=True,
-                    default_text=""):
-            w = QLineEdit()
-            if placeholder:
-                w.setPlaceholderText(placeholder)
-            if tip:
-                w.setToolTip(tip)
-            w.setFixedWidth(width)
-            if default_text:
-                w.setText(default_text)
-            _add_row(flag, "line", w, default="", include=include)
+        def make_helpers(form):
+            """Return (add_line, add_combo, add_check, add_spin, add_path) that
+            all target the given QFormLayout. Row structure matches the old
+            single-form version: [include_cb] [label] : [widget]."""
 
-        def add_combo(flag, items, default=None, tip="", include=True):
-            w = QComboBox()
-            w.addItems(items)
-            if default in items:
-                w.setCurrentText(default)
-            if tip:
-                w.setToolTip(tip)
-            _add_row(flag, "combo", w, default=default, include=include)
+            def _add_row(flag, kind, w, default=None, label_text=None,
+                         include=True, visual=None):
+                label_text = label_text or flag
+                label_widget = QWidget()
+                h = QHBoxLayout(label_widget)
+                h.setContentsMargins(0, 0, 0, 0)
+                h.setSpacing(6)
+                lbl = QLabel(label_text)
+                include_cb = None
+                if include:
+                    include_cb = QCheckBox()
+                    include_cb.setChecked(False)
+                    h.addWidget(include_cb)
+                    lbl.setEnabled(False)
+                    (visual or w).setEnabled(False)
 
-        def add_check(flag, tip="", include=True, default_checked=False):
-            w = QCheckBox()
-            if default_checked:
-                w.setChecked(True)
-            if tip:
-                w.setToolTip(tip)
-            _add_row(flag, "check", w, default=False, include=include)
+                    def on_toggle(checked, _w=w, _lbl=lbl, _v=visual,
+                                  _kind=kind, _default=default):
+                        _lbl.setEnabled(checked)
+                        (_v or _w).setEnabled(checked)
+                        if not checked:
+                            if _kind in ("spin", "dspin") and _default is not None:
+                                _w.blockSignals(True)
+                                _w.setValue(_default)
+                                _w.blockSignals(False)
+                            elif _kind == "combo":
+                                if _default is not None:
+                                    _w.setCurrentText(str(_default))
+                                else:
+                                    _w.setCurrentIndex(0)
+                            elif _kind == "line":
+                                _w.clear()
+                            elif _kind == "check":
+                                _w.setChecked(False)
 
-        def add_spin(flag, minv, maxv, step=1, default=None, tip="", include=True):
-            w = QSpinBox()
-            w.setRange(minv, maxv)
-            w.setSingleStep(step)
-            if default is not None:
-                w.setValue(default)
-            if tip:
-                w.setToolTip(tip)
-            _add_row(flag, "spin", w, default=default, include=include)
+                    include_cb.toggled.connect(on_toggle)
+                else:
+                    lbl.setEnabled(True)
+                    (visual or w).setEnabled(True)
+                h.addWidget(lbl)
+                h.addStretch(1)
+                form.addRow(label_widget, visual or w)
+                self.ai_widgets[flag] = (kind, w, include_cb, default)
 
-        # Search-method selector (always included; controls which pipeline
-        # tomocupy runs and thus which flag family below is relevant).
-        add_combo("--ai-search-method", ["fine", "full"], default="fine",
-                    tip="fine: single-stage inference_pipeline. "
-                        "full: two-stage bin_inference_pipeline.",
-                  include=False)
+            def add_line(flag, placeholder="", tip="", width=240, include=True,
+                         default_text=""):
+                w = QLineEdit()
+                if placeholder:
+                    w.setPlaceholderText(placeholder)
+                if tip:
+                    w.setToolTip(tip)
+                w.setFixedWidth(width)
+                if default_text:
+                    w.setText(default_text)
+                _add_row(flag, "line", w, default="", include=include)
 
-        # ---- fine-mode --infer-* params ---------------------------------
-        add_check("--infer-use-8bits", default_checked=True,
+            def add_combo(flag, items, default=None, tip="", include=True):
+                w = QComboBox()
+                w.addItems(items)
+                if default in items:
+                    w.setCurrentText(default)
+                if tip:
+                    w.setToolTip(tip)
+                _add_row(flag, "combo", w, default=default, include=include)
+
+            def add_check(flag, tip="", include=True, default_checked=False):
+                w = QCheckBox()
+                if default_checked:
+                    w.setChecked(True)
+                if tip:
+                    w.setToolTip(tip)
+                _add_row(flag, "check", w, default=False, include=include)
+
+            def add_spin(flag, minv, maxv, step=1, default=None, tip="",
+                         include=True):
+                w = QSpinBox()
+                w.setRange(minv, maxv)
+                w.setSingleStep(step)
+                if default is not None:
+                    w.setValue(default)
+                if tip:
+                    w.setToolTip(tip)
+                _add_row(flag, "spin", w, default=default, include=include)
+
+            def add_path(flag, default_text="", placeholder="", tip=""):
+                """Model-path row with a Browse button. Always sent (no include
+                checkbox) — the path is essential for the mode."""
+                container = QWidget()
+                hb = QHBoxLayout(container)
+                hb.setContentsMargins(0, 0, 0, 0)
+                hb.setSpacing(4)
+                le = QLineEdit()
+                if placeholder:
+                    le.setPlaceholderText(placeholder)
+                if tip:
+                    le.setToolTip(tip)
+                if default_text:
+                    le.setText(default_text)
+                hb.addWidget(le, 1)
+                btn = QPushButton("Browse")
+                btn.setFixedWidth(65)
+
+                def _browse():
+                    fn, _ = QFileDialog.getOpenFileName(
+                        self, "Select model weights", "",
+                        "Model files (*.pth *.pt);;All files (*)")
+                    if fn:
+                        le.setText(fn)
+
+                btn.clicked.connect(_browse)
+                hb.addWidget(btn)
+                _add_row(flag, "line", le, default="", include=False,
+                         visual=container)
+                return le
+
+            return add_line, add_combo, add_check, add_spin, add_path
+
+        add_line_f, add_combo_f, add_check_f, add_spin_f, add_path_f = make_helpers(fine_form)
+        add_line_b, add_combo_b, add_check_b, add_spin_b, add_path_b = make_helpers(full_form)
+
+        # ---- FINE (--infer-*) column ------------------------------------
+        self.ai_infer_model_path = add_path_f(
+            "--infer-model-path", default_text=_default_ai_model,
+            placeholder="Path to FINE model weights (.pth/.pt)",
+            tip="Path to the FINE model checkpoint used by the "
+                "single-stage inference_pipeline (fine search mode).")
+        add_check_f("--infer-use-8bits", default_checked=True,
                     tip="Requantize pixels to 8 bits before inference.")
-        add_line("--infer-downsample-factor",
-                placeholder="[1] or [1,2,4]",
-                tip="List of downsample factors applied to try slices.")
-        add_line("--infer-num-windows",
-                placeholder="[3]",
-                tip="Number of aggregation windows per slice.")
-        add_line("--infer-window-size",
-                placeholder="[518]",
-                tip="Square window size (DINOv2 native = 518).")
-        add_spin("--infer-seed-number", 0, 1_000_000, step=1, default=10,
-                tip="RNG seed for reproducibility.")
-        add_combo("--infer-input-data-type", ["raw", "try"], default="raw",
+        add_line_f("--infer-downsample-factor",
+                   placeholder="[1] or [1,2,4]",
+                   tip="List of downsample factors applied to try slices.")
+        add_line_f("--infer-num-windows",
+                   placeholder="[3]",
+                   tip="Number of aggregation windows per slice.")
+        add_line_f("--infer-window-size",
+                   placeholder="[518]",
+                   tip="Square window size (DINOv2 native = 518).")
+        add_spin_f("--infer-seed-number", 0, 1_000_000, step=1, default=10,
+                   tip="RNG seed for reproducibility.")
+        add_combo_f("--infer-input-data-type", ["raw", "try"], default="raw",
                     tip="Which cache the AI inference reads from.")
-        add_check("--infer-save-intermediate-data",
+        add_check_f("--infer-save-intermediate-data",
                     tip="Save per-slice model predictions to predicts_all.npz.")
-        add_line("--infer-input-dir",
-                placeholder="/path/to/tiff/dir or blank",
-                tip="Direct TIFF input dir (bypass try cache).")
-        add_line("--infer-batch-list",
-                placeholder="/path/to/list.txt or blank",
-                tip="Batch txt file listing input directories.")
-        add_line("--infer-out-dir-name",
-                placeholder="/path/for/output or blank",
-                tip="Output batches directory.")
+        add_line_f("--infer-input-dir",
+                   placeholder="/path/to/tiff/dir or blank",
+                   tip="Direct TIFF input dir (bypass try cache).")
+        add_line_f("--infer-batch-list",
+                   placeholder="/path/to/list.txt or blank",
+                   tip="Batch txt file listing input directories.")
+        add_line_f("--infer-out-dir-name",
+                   placeholder="/path/for/output or blank",
+                   tip="Output batches directory.")
 
-        # ---- full/bin-mode --bin-infer-* params -------------------------
-        add_line("--bin-infer-bin-sizes",
-                placeholder="[24,12]",
-                tip="Pixel step per bin per refinement stage.")
-        add_line("--bin-infer-bin-counts",
-                placeholder="[4,2]",
-                tip="Bins per stage (must be even).")
-        add_spin("--bin-infer-num-frames", 1, 1024, step=1, default=2,
-                tip="Frames aggregated per bin.")
-        add_line("--bin-infer-num-windows",
-                placeholder="[20]",
-                tip="Aggregation windows for bin inference.")
-        add_line("--bin-infer-window-size",
-                placeholder="[518]",
-                tip="Square window size for bin inference.")
-        add_spin("--bin-infer-aggregator-depth", 1, 64, step=1, default=5,
-                tip="Attention layers in the feature aggregator.")
-        add_spin("--bin-infer-aggregator-num-heads", 1, 64, step=1, default=12,
-                tip="Attention heads per layer.")
-        add_line("--bin-infer-downsample-factor",
-                placeholder="[1]",
-                tip="Downsample factor applied to try slices (bin mode).")
-        add_combo("--bin-infer-input-data-type", ["raw", "try"], default="raw",
+        # ---- FULL (--bin-infer-*) column --------------------------------
+        self.ai_bin_infer_model_path = add_path_b(
+            "--bin-infer-model-path", default_text=_default_ai_model,
+            placeholder="Path to FULL model weights (.pth/.pt)",
+            tip="Path to the FULL model checkpoint used by the two-stage "
+                "bin_inference_pipeline (full search mode).")
+        add_line_b("--bin-infer-bin-sizes",
+                   placeholder="[24,12]",
+                   tip="Pixel step per bin per refinement stage.")
+        add_line_b("--bin-infer-bin-counts",
+                   placeholder="[4,2]",
+                   tip="Bins per stage (must be even).")
+        add_spin_b("--bin-infer-num-frames", 1, 1024, step=1, default=2,
+                   tip="Frames aggregated per bin.")
+        add_line_b("--bin-infer-num-windows",
+                   placeholder="[20]",
+                   tip="Aggregation windows for bin inference.")
+        add_line_b("--bin-infer-window-size",
+                   placeholder="[518]",
+                   tip="Square window size for bin inference.")
+        add_spin_b("--bin-infer-aggregator-depth", 1, 64, step=1, default=5,
+                   tip="Attention layers in the feature aggregator.")
+        add_spin_b("--bin-infer-aggregator-num-heads", 1, 64, step=1, default=12,
+                   tip="Attention heads per layer.")
+        add_line_b("--bin-infer-downsample-factor",
+                   placeholder="[1]",
+                   tip="Downsample factor applied to try slices (bin mode).")
+        add_combo_b("--bin-infer-input-data-type", ["raw", "try"], default="raw",
                     tip="Which cache the bin AI reads from.")
-        add_spin("--bin-infer-seed-number", 0, 1_000_000, step=1, default=10,
-                tip="RNG seed for reproducibility (bin mode).")
-        add_check("--bin-infer-use-8bits", default_checked=True,
+        add_spin_b("--bin-infer-seed-number", 0, 1_000_000, step=1, default=10,
+                   tip="RNG seed for reproducibility (bin mode).")
+        add_check_b("--bin-infer-use-8bits", default_checked=True,
                     tip="Requantize pixels to 8 bits (bin mode).")
-        add_check("--bin-infer-save-intermediate-data",
+        add_check_b("--bin-infer-save-intermediate-data",
                     tip="Save per-slice bin predictions to range_predicts_all.npz.")
-        add_line("--bin-infer-input-dir",
-                placeholder="/path/to/tiff/dir or blank")
-        add_line("--bin-infer-batch-list",
-                placeholder="/path/to/list.txt or blank")
-        add_line("--bin-infer-out-dir-name",
-                placeholder="/path/for/output or blank")
+        add_line_b("--bin-infer-input-dir",
+                   placeholder="/path/to/tiff/dir or blank")
+        add_line_b("--bin-infer-batch-list",
+                   placeholder="/path/to/list.txt or blank")
+        add_line_b("--bin-infer-out-dir-name",
+                   placeholder="/path/for/output or blank")
 
         self.tabs.addTab(ai_tab, "AI COR")
 
     def _gather_ai_args(self):
         """Return the AI-COR CLI flags currently enabled on the AI tab.
-        Skipped when the model path is not set (nothing else makes sense
-        without a model)."""
-        model_path = self.ai_model_path.text().strip()
-        if not model_path or not os.path.exists(model_path):
+        Skipped when the required model path(s) for the selected search
+        method are not set (nothing else makes sense without a model)."""
+        if not self._ai_model_paths_ok():
             return []
         args = []
         for flag, (kind, w, include_cb, _default) in self.ai_widgets.items():
@@ -3831,9 +3931,10 @@ class TomoGUI(QWidget):
         QApplication.processEvents()
         self._persist_params_for_files([proj_file])
 
-        model_path = self.ai_model_path.text().strip()
-        if not model_path or not os.path.exists(model_path):
-            self.log_output.append('<span style="color:red;">Invalid AI model path</span>')
+        if not self._ai_model_paths_ok():
+            self.log_output.append(
+                '<span style="color:red;">Invalid AI model path — check the '
+                'FINE / FULL model fields on the AI COR tab.</span>')
             return
 
         # Resolve the starting COR seed: row first, then top-bar.
@@ -6041,10 +6142,10 @@ class TomoGUI(QWidget):
             return
         self._persist_params_for_files([proj_file])
 
-        model_path = self.ai_model_path.text().strip()
-        if not model_path or not os.path.exists(model_path):
+        if not self._ai_model_paths_ok():
             QMessageBox.warning(self, "CamRot",
-                                "AI model path is not valid.")
+                                "AI model path is not valid — check the "
+                                "FINE / FULL model fields on the AI COR tab.")
             return
 
         # Read vertical image size from /exchange/data
@@ -6431,10 +6532,11 @@ class TomoGUI(QWidget):
             QMessageBox.warning(self, "Warning", "No files selected.")
             return
 
-        model_path = self.ai_model_path.text().strip()
-        if not model_path or not os.path.exists(model_path):
-          self.log_output.append('<span style="color:red;">Invalid AI model path</span>')
-          return
+        if not self._ai_model_paths_ok():
+            self.log_output.append(
+                '<span style="color:red;">Invalid AI model path — check the '
+                'FINE / FULL model fields on the AI COR tab.</span>')
+            return
 
         # AI Reco seed policy (per file): row COR if set, else top-bar COR.
         # Validate up front that every selected file will have SOMETHING to
@@ -7174,10 +7276,10 @@ class TomoGUI(QWidget):
         # try output dir. The batch collector reads that file to fill in the
         # table + feed Full.
         if recon_type == 'infer':
-            model_path = self.ai_model_path.text().strip()
-            if not model_path or not os.path.exists(model_path):
+            if not self._ai_model_paths_ok():
                 self.log_output.append(
-                  f'<span style="color:red;">AI model path invalid for {filename}</span>'
+                  f'<span style="color:red;">AI model path invalid for {filename} '
+                  f'— check the FINE / FULL model fields on the AI COR tab.</span>'
                 )
                 return None
             data_folder = self.data_path.text().strip()
