@@ -3871,8 +3871,11 @@ class TomoGUI(QWidget):
             except ValueError:
               self.log_output.append(f'<span style="color:red;">wrong rotation axis input</span>')
               return
-        # cuda for tomocupy try
+        # cuda for tomocupy try — user-picked GPU (manual). One-shot VRAM
+        # check before we spawn; refuse rather than OOM the reconstruction.
         gpu = str(self.cuda_box_try.value())
+        if not self._check_gpu_vram(int(gpu), "Local", os.path.basename(proj_file)):
+            return
         #add check box for config, seperate from selecting parameters from GUI
         if self.use_conf_box.isChecked():
             self.log_output.append("You are using config file, only recon type, filename, rot axis from GUI")
@@ -3884,9 +3887,9 @@ class TomoGUI(QWidget):
             with open(temp_try, "w") as f:
                 f.write(config_text)
             # Base command
-            cmd = ["tomocupy", str(recon_way), 
-                "--reconstruction-type", "try", 
-                "--config", temp_try, 
+            cmd = ["tomocupy", str(recon_way),
+                "--reconstruction-type", "try",
+                "--config", temp_try,
                 "--file-name", proj_file]
             if cor_method == "auto":
                 cmd += ["--rotation-axis-auto", "auto"]
@@ -3997,6 +4000,9 @@ class TomoGUI(QWidget):
 
         recon_way = self.recon_way_box.currentText()
         gpu = str(self.cuda_box_try.value())
+        # One-shot VRAM guard for the AI Reco (single-file, manual GPU).
+        if not self._check_gpu_vram(int(gpu), "Local", os.path.basename(proj_file)):
+            return
         if self.use_conf_box.isChecked():
             self.log_output.append("You are using config file, only recon type, filename, rot axis from GUI")
             config_text = self.config_editor_try.toPlainText()
@@ -4421,6 +4427,9 @@ class TomoGUI(QWidget):
             highlight_row = self.highlight_row
             cor_method = self.cor_full_method.currentText()
             gpu = str(self.cuda_full_box.value())
+            # One-shot VRAM guard (single-file Full, manual GPU pick).
+            if not self._check_gpu_vram(int(gpu), "Local", os.path.basename(proj_file)):
+                return
             if cor_method == "manual":
                 try:
                     cor_value = float(self.batch_file_main_list[self.highlight_row]['cor_input'].text().strip())
@@ -4612,39 +4621,40 @@ class TomoGUI(QWidget):
         cache[(machine, gpu_id)] = (now, free_mb)
         return free_mb
 
-    def _pick_gpu_with_vram(self, available_gpus, machine, min_free_mb):
-        """From ``available_gpus`` (a list of GPU ids), pop and return the
-        first one whose free VRAM is ≥ ``min_free_mb`` (mutating the list).
-        Returns (gpu_id, free_mb) on success, or (None, per_gpu_map) when
-        no GPU meets the threshold — the map is {gpu_id: free_mb or None}
-        for logging. When min_free_mb is 0 the check is disabled and the
-        first GPU is returned unchanged."""
-        if min_free_mb <= 0 or not available_gpus:
-            if available_gpus:
-                g = available_gpus.pop(0)
-                return g, None
-            return None, {}
-        per_gpu = {}
-        keep = []
-        chosen = None
-        chosen_free = None
-        while available_gpus:
-            g = available_gpus.pop(0)
-            free = self._gpu_free_mb(g, machine)
-            per_gpu[g] = free
-            # Unknown (None) means the check failed — trust the user and try.
-            if free is None or free >= min_free_mb:
-                chosen = g
-                chosen_free = free
-                break
-            keep.append(g)
-        # Put back the GPUs that were skipped so they'll be re-polled next tick.
-        for g in keep:
-            available_gpus.append(g)
-        available_gpus.sort()
-        if chosen is None:
-            return None, per_gpu
-        return chosen, chosen_free
+    def _min_free_vram_mb(self):
+        """Read the min-VRAM spinbox safely (0 disables the check)."""
+        try:
+            return int(self.batch_min_free_vram.value())
+        except (AttributeError, RuntimeError):
+            return 0
+
+    def _check_gpu_vram(self, gpu_id, machine, filename=""):
+        """One-shot check: does GPU ``gpu_id`` on ``machine`` have enough
+        free VRAM to run a reconstruction? Called by every launch site right
+        before spawning the tomocupy subprocess — no polling, no retry.
+
+        Returns True to proceed. Returns False when free VRAM is below the
+        threshold; a message naming the file, GPU and current free memory
+        is logged so the user knows why the job wasn't submitted. When the
+        check itself cannot run (no nvidia-smi, SSH broken, …) we return
+        True so a broken probe never blocks a run.
+        """
+        min_free_mb = self._min_free_vram_mb()
+        if min_free_mb <= 0:
+            return True
+        free_mb = self._gpu_free_mb(gpu_id, machine)
+        if free_mb is None:
+            return True  # probe failed — trust the user's setup
+        if free_mb >= min_free_mb:
+            return True
+        tag = f" for {filename}" if filename else ""
+        self.log_output.append(
+            f'<span style="color:red;">⚠ GPU {gpu_id} on {machine} has only '
+            f'{free_mb} MiB free (need ≥ {min_free_mb}); skipping job{tag} '
+            f'to avoid an OOM crash. Wait for other jobs to finish, lower '
+            f'the min-VRAM threshold, or pick a different GPU.</span>'
+        )
+        return False
 
     # ===== COR MANAGEMENT =====
     def record_cor_main_tb(self):
@@ -7151,49 +7161,10 @@ class TomoGUI(QWidget):
             )
             QApplication.processEvents()
 
-            # Start new jobs if GPUs are available and jobs are queued.
-            # Per-job VRAM gate: query nvidia-smi for each candidate GPU and
-            # only dispatch when free memory ≥ batch_min_free_vram. When no
-            # available GPU passes, the job is held (queue not popped) and
-            # we break to the completion-check + sleep so the loop doesn't
-            # spin. If nvidia-smi cannot be queried we treat the result as
-            # unknown and proceed, so a broken check never stalls the queue.
-            try:
-                min_free_mb = int(self.batch_min_free_vram.value())
-            except (AttributeError, RuntimeError):
-                min_free_mb = 0
-            deferred_this_tick = False
+            # Start new jobs if GPUs are available and jobs are queued
             while self.batch_available_gpus and self.batch_job_queue:
-                file_info, job_recon_type, job_machine = self.batch_job_queue[0]
-                gpu_id, gpu_free = self._pick_gpu_with_vram(
-                    self.batch_available_gpus, job_machine, min_free_mb)
-                if gpu_id is None:
-                    # No GPU has enough free VRAM right now — leave the job
-                    # in place, complain once per tick, and let the outer
-                    # loop's completion-check + sleep give VRAM a chance to
-                    # free up. When the pick fails, the second return value
-                    # is the per-GPU free-memory map used for the log line.
-                    per_gpu = gpu_free or {}
-                    detail = ", ".join(
-                        f"GPU {g}: "
-                        + ("?" if v is None else f"{v} MiB")
-                        for g, v in sorted(per_gpu.items())
-                    ) or "no GPUs available"
-                    self.log_output.append(
-                        f'<span style="color:#b26a00;">⏸ '
-                        f'{file_info.get("filename","?")}: waiting for free VRAM '
-                        f'(need ≥ {min_free_mb} MiB — {detail})</span>'
-                    )
-                    deferred_this_tick = True
-                    break
-                # Commit: pop the job now that we have a GPU for it.
-                self.batch_job_queue.pop(0)
-                if gpu_free is not None:
-                    self.log_output.append(
-                        f'<span style="color:gray;">GPU {gpu_id}: {gpu_free} MiB free '
-                        f'(≥ {min_free_mb} MiB) — dispatching '
-                        f'{file_info.get("filename","?")}</span>'
-                    )
+                gpu_id = self.batch_available_gpus.pop(0)
+                file_info, job_recon_type, job_machine = self.batch_job_queue.pop(0)
 
                 try:
                     self._set_status_by_filename(
@@ -7331,12 +7302,6 @@ class TomoGUI(QWidget):
             if self.batch_running_jobs:
                 import time
                 time.sleep(0.2)
-            elif deferred_this_tick:
-                # No jobs running AND at least one queued job is waiting for
-                # VRAM to free up on the target machine. Without a sleep we
-                # would spin the loop and re-log the same warning every ms.
-                import time
-                time.sleep(2.0)
 
         # Finalize
         if progress_window_opened:
@@ -7425,6 +7390,13 @@ class TomoGUI(QWidget):
         """
         file_path = file_info['path']
         filename = os.path.basename(file_path)
+
+        # One-shot VRAM guard — refuse to submit onto a GPU that would OOM.
+        # Runs once per job at dispatch time (no polling loop). When it says
+        # no, we return None so the dispatcher marks the job "Skipped" and
+        # moves on rather than crashing the reconstruction.
+        if not self._check_gpu_vram(gpu_id, machine, filename):
+            return None
 
         # AI COR: launch tomocupy in try mode with the built-in AI center
         # finder. Tomocupy runs the try recon, executes the AI inference on
