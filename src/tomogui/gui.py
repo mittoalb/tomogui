@@ -2887,17 +2887,18 @@ class TomoGUI(QWidget):
         if not table_folder or not os.path.isdir(table_folder):
             QMessageBox.warning(self, "Warning", "Please select a valid data folder first.")
             return
-        if self.batch_running:
-            reply = QMessageBox.question(
-                self, 'Queue Running',
-                f'A batch queue is currently running ({len(self.batch_running_jobs)} jobs active, {len(self.batch_job_queue)} queued).\n\n'
-                f'Refreshing will delete the table widgets but jobs will continue running in the background.\n\n'
-                f'Continue with refresh?',
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        # A running queue does NOT block a refresh — the reconstruction
+        # subprocesses are independent of the Qt table. After the rebuild we
+        # re-bind every queued/running job to its NEW file_info (matched by
+        # filename) so completion callbacks land on the correct row and
+        # CORs are written by filename rather than by stored row index.
+        queue_was_running = self.batch_running
+        if queue_was_running:
+            self.log_output.append(
+                f'<span style="color:gray;">🔁 Refreshing table while queue is running '
+                f'({len(self.batch_running_jobs)} active, {len(self.batch_job_queue)} queued) '
+                f'— jobs continue; their table rows will be re-linked by filename.</span>'
             )
-            if reply == QMessageBox.No:
-                return
-                self.log_output.append(f'<span style="color:orange;"> Refreshed file list while queue was running - status updates may be lost</span>')
         h5_files = sorted(glob.glob(os.path.join(table_folder, "*.h5")), key=os.path.getmtime, reverse=True)
         self.batch_file_main_table.setSortingEnabled(False)
         self.batch_file_main_table.setRowCount(0)
@@ -3027,6 +3028,39 @@ class TomoGUI(QWidget):
             self.highlight_row = 0
             self.log_output.append(f'Clicked on {self.highlight_scan}')
             self._load_scan_params(self.highlight_scan)
+
+        # Re-link any live batch jobs (queued or running) to the freshly
+        # rebuilt file_info dicts, matched by filename. The reconstruction
+        # subprocesses keep running through the refresh — we only need to
+        # redirect their bookkeeping to the new widgets so results land on
+        # the right row (by name, not by index).
+        if queue_was_running:
+            self._rebind_batch_jobs_after_refresh()
+
+    def _rebind_batch_jobs_after_refresh(self):
+        """After the main table is rebuilt, walk every live batch job and
+        replace its ``file_info`` reference (which points at the now-deleted
+        widgets) with the new dict from ``batch_file_main_list`` whose
+        filename matches. Jobs whose file has disappeared from the folder
+        are left alone — their completion callbacks already guard against
+        stale widget refs and will land as a "widget deleted" log line.
+
+        Filename is the identifier we key on end-to-end: CORs are written
+        to the row whose filename matches, not to a stored row index.
+        """
+        by_name = {fi['filename']: fi for fi in self.batch_file_main_list}
+        # Running jobs: batch_running_jobs[gpu_id] = (process, file_info, recon_type)
+        for gpu_id, (process, old_fi, recon_type) in list(
+                self.batch_running_jobs.items()):
+            new_fi = by_name.get(old_fi.get('filename'))
+            if new_fi is not None:
+                self.batch_running_jobs[gpu_id] = (process, new_fi, recon_type)
+        # Queued jobs: entries are (file_info, recon_type, machine)
+        for i, entry in enumerate(list(self.batch_job_queue)):
+            old_fi, recon_type, machine = entry
+            new_fi = by_name.get(old_fi.get('filename'))
+            if new_fi is not None:
+                self.batch_job_queue[i] = (new_fi, recon_type, machine)
 
     def _save_cor_data(self, data_folder, cor_data_dict):
         """
