@@ -564,6 +564,28 @@ class TomoGUI(QWidget):
         self.batch_gpus_per_machine.setStyleSheet("QSpinBox { font-size: 10.5pt; }")
         batch_ops.addWidget(self.batch_gpus_per_machine)
 
+        # Minimum free VRAM (MiB) required to dispatch a job onto a GPU.
+        # The queue polls nvidia-smi and skips GPUs below this threshold —
+        # if none pass, the job is held and retried next tick instead of
+        # OOM-crashing tomocupy.
+        min_vram_lbl = QLabel("min VRAM")
+        min_vram_lbl.setStyleSheet("QLabel { font-size: 10.5pt; }")
+        min_vram_lbl.setToolTip("Minimum free VRAM (MiB) required on a GPU "
+                                "before a job is dispatched to it. Jobs wait "
+                                "when no GPU has enough free memory.")
+        batch_ops.addWidget(min_vram_lbl)
+        self.batch_min_free_vram = QSpinBox()
+        self.batch_min_free_vram.setRange(0, 200_000)
+        self.batch_min_free_vram.setSingleStep(1000)
+        self.batch_min_free_vram.setValue(8000)
+        self.batch_min_free_vram.setSuffix(" MiB")
+        self.batch_min_free_vram.setFixedWidth(90)
+        self.batch_min_free_vram.setStyleSheet("QSpinBox { font-size: 10.5pt; }")
+        self.batch_min_free_vram.setToolTip(
+            "Minimum free VRAM (MiB) required on a GPU before a job is "
+            "dispatched to it. 0 disables the check.")
+        batch_ops.addWidget(self.batch_min_free_vram)
+
         # Checkbox for opening remote jobs in terminal
         self.batch_use_terminal = QCheckBox("Terminal")
         self.batch_use_terminal.setToolTip("Open remote jobs in separate terminal windows")
@@ -4539,6 +4561,91 @@ class TomoGUI(QWidget):
 
         return ssh_cmd
 
+    # ===== GPU VRAM MONITORING =====
+
+    def _gpu_free_mb(self, gpu_id, machine):
+        """Return free VRAM (MiB) on GPU ``gpu_id`` of ``machine``, or None
+        when nvidia-smi cannot be queried (missing binary, SSH failure, …).
+        None means "unknown" — the dispatcher treats that as OK so the queue
+        doesn't stall when the check itself is broken.
+
+        Results are cached for a short window per (machine, gpu_id) so the
+        dispatcher's tight polling loop doesn't hammer nvidia-smi (or SSH).
+        """
+        import subprocess
+        import time as _time
+        cache = getattr(self, "_vram_cache", None)
+        if cache is None:
+            self._vram_cache = {}
+            cache = self._vram_cache
+        now = _time.monotonic()
+        cached = cache.get((machine, gpu_id))
+        if cached is not None and (now - cached[0]) < 2.0:
+            return cached[1]
+
+        smi_args = ["nvidia-smi",
+                    "--query-gpu=memory.free",
+                    "--format=csv,noheader,nounits",
+                    "-i", str(gpu_id)]
+        try:
+            if machine == "Local":
+                cmd = smi_args
+                out = subprocess.check_output(
+                    cmd, stderr=subprocess.DEVNULL, timeout=5.0)
+            else:
+                mc = self.machine_config.get(machine, {})
+                username = mc.get("username", os.getenv("USER", ""))
+                hostname = mc.get("hostname", machine)
+                target = f"{username}@{hostname}" if username else hostname
+                # BatchMode + no-tty so ssh fails fast if keys aren't set up
+                # instead of hanging for a password prompt.
+                ssh_cmd = ["ssh", "-o", "BatchMode=yes",
+                           "-o", "StrictHostKeyChecking=no",
+                           "-o", "ConnectTimeout=5",
+                           target, " ".join(smi_args)]
+                out = subprocess.check_output(
+                    ssh_cmd, stderr=subprocess.DEVNULL, timeout=10.0)
+            free_mb = int(out.decode().strip().splitlines()[0])
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                FileNotFoundError, ValueError, IndexError):
+            free_mb = None
+        cache[(machine, gpu_id)] = (now, free_mb)
+        return free_mb
+
+    def _pick_gpu_with_vram(self, available_gpus, machine, min_free_mb):
+        """From ``available_gpus`` (a list of GPU ids), pop and return the
+        first one whose free VRAM is ≥ ``min_free_mb`` (mutating the list).
+        Returns (gpu_id, free_mb) on success, or (None, per_gpu_map) when
+        no GPU meets the threshold — the map is {gpu_id: free_mb or None}
+        for logging. When min_free_mb is 0 the check is disabled and the
+        first GPU is returned unchanged."""
+        if min_free_mb <= 0 or not available_gpus:
+            if available_gpus:
+                g = available_gpus.pop(0)
+                return g, None
+            return None, {}
+        per_gpu = {}
+        keep = []
+        chosen = None
+        chosen_free = None
+        while available_gpus:
+            g = available_gpus.pop(0)
+            free = self._gpu_free_mb(g, machine)
+            per_gpu[g] = free
+            # Unknown (None) means the check failed — trust the user and try.
+            if free is None or free >= min_free_mb:
+                chosen = g
+                chosen_free = free
+                break
+            keep.append(g)
+        # Put back the GPUs that were skipped so they'll be re-polled next tick.
+        for g in keep:
+            available_gpus.append(g)
+        available_gpus.sort()
+        if chosen is None:
+            return None, per_gpu
+        return chosen, chosen_free
+
     # ===== COR MANAGEMENT =====
     def record_cor_main_tb(self):
         '''
@@ -7044,10 +7151,49 @@ class TomoGUI(QWidget):
             )
             QApplication.processEvents()
 
-            # Start new jobs if GPUs are available and jobs are queued
+            # Start new jobs if GPUs are available and jobs are queued.
+            # Per-job VRAM gate: query nvidia-smi for each candidate GPU and
+            # only dispatch when free memory ≥ batch_min_free_vram. When no
+            # available GPU passes, the job is held (queue not popped) and
+            # we break to the completion-check + sleep so the loop doesn't
+            # spin. If nvidia-smi cannot be queried we treat the result as
+            # unknown and proceed, so a broken check never stalls the queue.
+            try:
+                min_free_mb = int(self.batch_min_free_vram.value())
+            except (AttributeError, RuntimeError):
+                min_free_mb = 0
+            deferred_this_tick = False
             while self.batch_available_gpus and self.batch_job_queue:
-                gpu_id = self.batch_available_gpus.pop(0)
-                file_info, job_recon_type, job_machine = self.batch_job_queue.pop(0)
+                file_info, job_recon_type, job_machine = self.batch_job_queue[0]
+                gpu_id, gpu_free = self._pick_gpu_with_vram(
+                    self.batch_available_gpus, job_machine, min_free_mb)
+                if gpu_id is None:
+                    # No GPU has enough free VRAM right now — leave the job
+                    # in place, complain once per tick, and let the outer
+                    # loop's completion-check + sleep give VRAM a chance to
+                    # free up. When the pick fails, the second return value
+                    # is the per-GPU free-memory map used for the log line.
+                    per_gpu = gpu_free or {}
+                    detail = ", ".join(
+                        f"GPU {g}: "
+                        + ("?" if v is None else f"{v} MiB")
+                        for g, v in sorted(per_gpu.items())
+                    ) or "no GPUs available"
+                    self.log_output.append(
+                        f'<span style="color:#b26a00;">⏸ '
+                        f'{file_info.get("filename","?")}: waiting for free VRAM '
+                        f'(need ≥ {min_free_mb} MiB — {detail})</span>'
+                    )
+                    deferred_this_tick = True
+                    break
+                # Commit: pop the job now that we have a GPU for it.
+                self.batch_job_queue.pop(0)
+                if gpu_free is not None:
+                    self.log_output.append(
+                        f'<span style="color:gray;">GPU {gpu_id}: {gpu_free} MiB free '
+                        f'(≥ {min_free_mb} MiB) — dispatching '
+                        f'{file_info.get("filename","?")}</span>'
+                    )
 
                 try:
                     self._set_status_by_filename(
@@ -7185,6 +7331,12 @@ class TomoGUI(QWidget):
             if self.batch_running_jobs:
                 import time
                 time.sleep(0.2)
+            elif deferred_this_tick:
+                # No jobs running AND at least one queued job is waiting for
+                # VRAM to free up on the target machine. Without a sleep we
+                # would spin the loop and re-log the same warning every ms.
+                import time
+                time.sleep(2.0)
 
         # Finalize
         if progress_window_opened:
