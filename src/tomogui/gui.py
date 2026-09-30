@@ -66,7 +66,7 @@ except ImportError:
 from .theme_manager import ThemeManager
 from .chatbot import ChatBotDialog
 from .hdf5_viewer import HDF5ImageDividerDialog
-from .batch_progress_window import ProgressWindow
+from .batch_progress_window import ProgressWindow, JobQueueWindow
 
 
 class SyncWatcher(QThread):
@@ -246,6 +246,9 @@ class TomoGUI(QWidget):
         self.progress_window = ProgressWindow(self)
         #stop button in progress window stops the same batch queue
         self.progress_window.stop_requested.connect(self._batch_stop_queue)
+        # Job-queue overview is created on first open (see _show_job_queue).
+        # It's a read-only observer of batch_job_queue / batch_running_jobs.
+        self._job_queue_window = None
 
         # Load machine configuration
         self.machine_config = self._load_machine_config()
@@ -307,9 +310,9 @@ class TomoGUI(QWidget):
         refresh_btn2 = QPushButton("     Refresh     ")
         refresh_btn2.setStyleSheet("QPushButton { font-size: 10.5pt; }")
         refresh_btn2.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        refresh_btn2.clicked.connect(self.refresh_main_table)      
+        refresh_btn2.clicked.connect(self.refresh_main_table)
         refresh_btn2.setToolTip(f"Update from files status and rot_cen.json")
-        folder_layout.addWidget(refresh_btn2)  
+        folder_layout.addWidget(refresh_btn2)
         left_layout.addLayout(folder_layout)
 
         # ==== TABS (Configs + Params) ====
@@ -585,6 +588,19 @@ class TomoGUI(QWidget):
             "Minimum free VRAM (MiB) required on a GPU before a job is "
             "dispatched to it. 0 disables the check.")
         batch_ops.addWidget(self.batch_min_free_vram)
+
+        # Overview window for the batch job queue. Read-only observer of
+        # batch_running_jobs + batch_job_queue — clicking this does NOT
+        # touch the queue.
+        show_queue_btn = QPushButton("Show Queue")
+        show_queue_btn.setStyleSheet(
+            "QPushButton { font-size: 10.5pt; }")
+        show_queue_btn.setFixedWidth(105)
+        show_queue_btn.setToolTip(
+            "Open a live overview of every batch job: dataset, machine, "
+            "GPU, type, status. Auto-refreshes while open.")
+        show_queue_btn.clicked.connect(self._show_job_queue)
+        batch_ops.addWidget(show_queue_btn)
 
         # Checkbox for opening remote jobs in terminal
         self.batch_use_terminal = QCheckBox("Terminal")
@@ -7350,6 +7366,21 @@ class TomoGUI(QWidget):
         self._batch_active = False   # re-enable per-scan param load/save on clicks
         self.log_output.append('<span style="color:blue;">batch_running set to False, ready for new batch</span>')
 
+
+    def _show_job_queue(self):
+        """Open (or bring to front) the batch job-queue overview window.
+        Instantiated lazily so the GUI starts fast; the window observes
+        self.batch_job_queue / self.batch_running_jobs on a 1 s timer
+        and never mutates them."""
+        if self._job_queue_window is None:
+            self._job_queue_window = JobQueueWindow(self, self)
+        w = self._job_queue_window
+        w.show()
+        w.raise_()
+        w.activateWindow()
+        # Force an immediate refresh so the user sees state the moment
+        # the window paints (rather than waiting for the first timer tick).
+        w.refresh()
 
     def _batch_stop_queue(self):
         """Immediately stop the batch queue and kill all running jobs."""
