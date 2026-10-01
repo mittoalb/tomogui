@@ -1076,11 +1076,12 @@ class TomoGUI(QWidget):
         _right_container.setLayout(right_layout)
         _right_container.setMinimumWidth(400)
         self._main_splitter.addWidget(_right_container)
-        # Was [800, 1200] with stretch (4, 5) — now −30% on the table side
-        # and +30% on the image preview side, as requested.
-        self._main_splitter.setStretchFactor(0, 3)
-        self._main_splitter.setStretchFactor(1, 7)
-        self._main_splitter.setSizes([560, 1560])
+        # Halfway between the original [800, 1200] and the −30% [560, 1560]:
+        # the table gets back some breathing room without losing the preview
+        # gain. User can still drag the handle in either direction.
+        self._main_splitter.setStretchFactor(0, 1)
+        self._main_splitter.setStretchFactor(1, 2)
+        self._main_splitter.setSizes([680, 1380])
         self.setLayout(main_layout)
 
         # Apply initial theme after UI is fully built
@@ -2505,7 +2506,7 @@ class TomoGUI(QWidget):
         add_spin_b("--bin-infer-num-frames", 1, 1024, step=1, default=2,
                    tip="Frames aggregated per bin.")
         add_line_b("--bin-infer-num-windows",
-                   placeholder="[20]",
+                   placeholder="[10]",
                    tip="Aggregation windows for bin inference.")
         add_line_b("--bin-infer-window-size",
                    placeholder="[518]",
@@ -2525,6 +2526,13 @@ class TomoGUI(QWidget):
                     tip="Requantize pixels to 8 bits (bin mode).")
         add_check_b("--bin-infer-save-intermediate-data",
                     tip="Save per-slice bin predictions to range_predicts_all.npz.")
+        # New in stang292/tomocupy@develop: cache the preprocessed stack so
+        # a two-stage full search doesn't redo preprocessing between stages.
+        # Costs RAM but saves wall-clock on big datasets.
+        add_check_b("--bin-infer-cache-preprocessed",
+                    tip="Cache the preprocessed projection stack between the "
+                        "two refinement stages of 'full' search. Saves time "
+                        "on large datasets at the cost of extra RAM.")
         add_line_b("--bin-infer-input-dir",
                    placeholder="/path/to/tiff/dir or blank")
         add_line_b("--bin-infer-batch-list",
