@@ -801,11 +801,23 @@ class TomoGUI(QWidget):
         # preview panel. The user can drag the handle between them to make
         # the preview bigger or the table bigger, instead of being locked
         # into our stretch-factor ratio.
+        #
+        # NOTE on minimum widths: the data-folder row has setFixedWidth(580)
+        # on self.data_path plus two buttons, which otherwise pins the left
+        # panel's minimum width around ~900 px and leaves the splitter with
+        # nowhere to go. Overriding minimumWidth on the container lets the
+        # splitter shrink the panel below its children's natural width (the
+        # inner widgets just clip off the right edge if you drag that far).
         self._main_splitter = QSplitter(Qt.Horizontal)
         self._main_splitter.setChildrenCollapsible(False)
-        self._main_splitter.setHandleWidth(6)
+        self._main_splitter.setHandleWidth(8)
+        self._main_splitter.setStyleSheet(
+            "QSplitter::handle { background: #555; }"
+            "QSplitter::handle:hover { background: #1a8cff; }"
+        )
         _left_container = QWidget()
         _left_container.setLayout(left_layout)
+        _left_container.setMinimumWidth(300)
         self._main_splitter.addWidget(_left_container)
         main_layout.addWidget(self._main_splitter)
 
@@ -828,10 +840,12 @@ class TomoGUI(QWidget):
             right_layout.addLayout(toolbar_row)
             _right_container = QWidget()
             _right_container.setLayout(right_layout)
+            _right_container.setMinimumWidth(400)
             self._main_splitter.addWidget(_right_container)
             self._main_splitter.setStretchFactor(0, 4)
             self._main_splitter.setStretchFactor(1, 8)
-            self._main_splitter.setSizes([700, 1300])
+            # Was [700, 1300] — now −30% on the table, +30% on the preview.
+            self._main_splitter.setSizes([490, 1690])
             self.setLayout(main_layout)
             return
 
@@ -1060,10 +1074,13 @@ class TomoGUI(QWidget):
         # proportion; initial sizes seed the ratio before the first resize.
         _right_container = QWidget()
         _right_container.setLayout(right_layout)
+        _right_container.setMinimumWidth(400)
         self._main_splitter.addWidget(_right_container)
-        self._main_splitter.setStretchFactor(0, 4)
-        self._main_splitter.setStretchFactor(1, 5)
-        self._main_splitter.setSizes([800, 1200])
+        # Was [800, 1200] with stretch (4, 5) — now −30% on the table side
+        # and +30% on the image preview side, as requested.
+        self._main_splitter.setStretchFactor(0, 3)
+        self._main_splitter.setStretchFactor(1, 7)
+        self._main_splitter.setSizes([560, 1560])
         self.setLayout(main_layout)
 
         # Apply initial theme after UI is fully built
