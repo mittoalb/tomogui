@@ -525,19 +525,21 @@ class TomoGUI(QWidget):
                                                         "Status", "Size", "Pixel", "View Data"])
         self.batch_file_main_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         header = self.batch_file_main_table.horizontalHeader()
-        # Only the File Name column stretches — the info columns (COR, Status,
-        # Size, Pixel) get compact fixed widths so they stop hogging the row.
-        header.setSectionResizeMode(0, QHeaderView.Fixed)             # Select
-        header.setSectionResizeMode(1, QHeaderView.Stretch)           # File Name
-        header.setSectionResizeMode(2, QHeaderView.Fixed)             # COR
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Status
-        header.setSectionResizeMode(4, QHeaderView.Fixed)             # Size
-        header.setSectionResizeMode(5, QHeaderView.Fixed)             # Pixel
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # View Data
+        # Every column user-resizable (drag the header dividers). No Stretch
+        # anywhere — otherwise one column eats the rest of the row. We seed
+        # sensible default widths instead; the user is free to grow or shrink
+        # any of them. Select is fixed because resizing a checkbox cell is
+        # pointless.
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setSectionResizeMode(0, QHeaderView.Fixed)  # Select
+        header.setStretchLastSection(False)
         self.batch_file_main_table.setColumnWidth(0, 50)   # Select
-        self.batch_file_main_table.setColumnWidth(2, 90)   # COR (line-edit)
-        self.batch_file_main_table.setColumnWidth(4, 90)   # Size (e.g. "1.2 GB")
-        self.batch_file_main_table.setColumnWidth(5, 140)  # Pixel ("W×H×N")
+        self.batch_file_main_table.setColumnWidth(1, 350)  # File Name
+        self.batch_file_main_table.setColumnWidth(2, 90)   # COR
+        self.batch_file_main_table.setColumnWidth(3, 110)  # Status
+        self.batch_file_main_table.setColumnWidth(4, 90)   # Size
+        self.batch_file_main_table.setColumnWidth(5, 140)  # Pixel
+        self.batch_file_main_table.setColumnWidth(6, 100)  # View Data
         main_tab.addWidget(self.batch_file_main_table)
         #Row 5: batch process operations
         batch_ops = QHBoxLayout()
