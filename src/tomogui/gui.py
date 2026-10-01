@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (
     QComboBox, QSlider, QGroupBox, QSizePolicy, QMessageBox,
     QTabWidget, QFormLayout, QCheckBox, QSpinBox, QDoubleSpinBox,
     QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,QFrame,
-    QDialog
+    QDialog, QSplitter
 )
 from PyQt5.QtCore import Qt, QEvent, QProcess, QEventLoop, QSize, QProcessEnvironment, QThread, pyqtSignal
 from PyQt5.QtGui import QColor
@@ -797,8 +797,18 @@ class TomoGUI(QWidget):
         #og_json_layout.addLayout(log_box_layout)
         #left_layout.addLayout(log_json_layout)
         
-        main_layout.addLayout(left_layout, 4)
-        
+        # Horizontal splitter between the controls+table panel and the image
+        # preview panel. The user can drag the handle between them to make
+        # the preview bigger or the table bigger, instead of being locked
+        # into our stretch-factor ratio.
+        self._main_splitter = QSplitter(Qt.Horizontal)
+        self._main_splitter.setChildrenCollapsible(False)
+        self._main_splitter.setHandleWidth(6)
+        _left_container = QWidget()
+        _left_container.setLayout(left_layout)
+        self._main_splitter.addWidget(_left_container)
+        main_layout.addWidget(self._main_splitter)
+
         # ==== RIGHT PANEL ====
         right_layout = QVBoxLayout()
         toolbar_row = QHBoxLayout()
@@ -816,7 +826,12 @@ class TomoGUI(QWidget):
             error_label.setWordWrap(True)
             toolbar_row.addWidget(error_label)
             right_layout.addLayout(toolbar_row)
-            main_layout.addLayout(right_layout, 8)
+            _right_container = QWidget()
+            _right_container.setLayout(right_layout)
+            self._main_splitter.addWidget(_right_container)
+            self._main_splitter.setStretchFactor(0, 4)
+            self._main_splitter.setStretchFactor(1, 8)
+            self._main_splitter.setSizes([700, 1300])
             self.setLayout(main_layout)
             return
 
@@ -1040,7 +1055,15 @@ class TomoGUI(QWidget):
         tomolog_group.setLayout(tomolog_layout)
         right_layout.addWidget(tomolog_group, 2)
 
-        main_layout.addLayout(right_layout, 5)
+        # Right panel goes into the splitter created when the left panel was
+        # added. Stretch factors mean a resized window grows both sides in
+        # proportion; initial sizes seed the ratio before the first resize.
+        _right_container = QWidget()
+        _right_container.setLayout(right_layout)
+        self._main_splitter.addWidget(_right_container)
+        self._main_splitter.setStretchFactor(0, 4)
+        self._main_splitter.setStretchFactor(1, 5)
+        self._main_splitter.setSizes([800, 1200])
         self.setLayout(main_layout)
 
         # Apply initial theme after UI is fully built
