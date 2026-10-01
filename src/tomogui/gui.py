@@ -525,16 +525,19 @@ class TomoGUI(QWidget):
                                                         "Status", "Size", "Pixel", "View Data"])
         self.batch_file_main_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         header = self.batch_file_main_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Interactive)  # Allow user to resize columns
-        header.setSectionResizeMode(0, QHeaderView.Fixed)  # Select checkbox
-        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Filename - user can resize
-        header.setSectionResizeMode(2, QHeaderView.Stretch)  # COR
+        # Only the File Name column stretches — the info columns (COR, Status,
+        # Size, Pixel) get compact fixed widths so they stop hogging the row.
+        header.setSectionResizeMode(0, QHeaderView.Fixed)             # Select
+        header.setSectionResizeMode(1, QHeaderView.Stretch)           # File Name
+        header.setSectionResizeMode(2, QHeaderView.Fixed)             # COR
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Status
-        header.setSectionResizeMode(4, QHeaderView.Stretch)  # Size
-        header.setSectionResizeMode(5, QHeaderView.Stretch)  # Actions
+        header.setSectionResizeMode(4, QHeaderView.Fixed)             # Size
+        header.setSectionResizeMode(5, QHeaderView.Fixed)             # Pixel
         header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # View Data
-        self.batch_file_main_table.setColumnWidth(0,50)
-        self.batch_file_main_table.setColumnWidth(1, 350) # Set initial width for filename column to be wider (can be resized by user)    
+        self.batch_file_main_table.setColumnWidth(0, 50)   # Select
+        self.batch_file_main_table.setColumnWidth(2, 90)   # COR (line-edit)
+        self.batch_file_main_table.setColumnWidth(4, 90)   # Size (e.g. "1.2 GB")
+        self.batch_file_main_table.setColumnWidth(5, 140)  # Pixel ("W×H×N")
         main_tab.addWidget(self.batch_file_main_table)
         #Row 5: batch process operations
         batch_ops = QHBoxLayout()
@@ -3013,12 +3016,30 @@ class TomoGUI(QWidget):
                 self.batch_file_main_table.setItem(row, 4, size_item)
             except Exception as e:
                 self.batch_file_main_table.setItem(row, 4, QTableWidgetItem("N/A"))
-            # Actions button (placeholder for future actions)
-            actions_widget = QWidget()
-            actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setContentsMargins(2, 2, 2, 2)
-            actions_layout.setSpacing(2)
-            self.batch_file_main_table.setCellWidget(row, 5, actions_widget)
+
+            # Pixel dimensions of the raw projection stack, read from
+            # /exchange/data.shape = (nprojs, ny, nx). We show it as
+            # "nx × ny × nprojs" so the sensor dimensions come first — that
+            # is what the user typically cares about at a glance. h5py only
+            # reads the metadata header here, no pixel data.
+            pixel_str = "?"
+            try:
+                with h5py.File(f, 'r') as _fh:
+                    dset = _fh.get('exchange/data')
+                    if dset is not None and dset.ndim >= 3:
+                        nprojs, ny, nx = (int(dset.shape[0]),
+                                          int(dset.shape[1]),
+                                          int(dset.shape[2]))
+                        pixel_str = f"{nx}×{ny}×{nprojs}"
+                    elif dset is not None:
+                        pixel_str = "×".join(str(int(s)) for s in dset.shape)
+            except Exception:
+                pixel_str = "?"
+            pixel_item = QTableWidgetItem(pixel_str)
+            pixel_item.setTextAlignment(Qt.AlignCenter)
+            pixel_item.setToolTip("Raw projection stack: nx × ny × nprojs "
+                                  "from /exchange/data")
+            self.batch_file_main_table.setItem(row, 5, pixel_item)
 
             # View Data button
             view_data_btn = QPushButton("View Data")
