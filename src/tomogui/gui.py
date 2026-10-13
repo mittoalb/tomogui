@@ -3919,12 +3919,20 @@ class TomoGUI(QWidget):
         return p
 
     # ===== RECONSTRUCTION METHODS =====
-    def _update_row(self,row,color,status):
-        row = self.highlight_row
+    def _update_row(self, row, color, status):
+        # Historically this method stomped on its ``row`` argument with
+        # self.highlight_row, which broke anything running asynchronously:
+        # if the user clicked a different file while a Try/Full/AI job was
+        # in flight, the completion handler wrote its "Done" status onto
+        # whichever row happened to be highlighted *now*. Trust the caller.
         if row is None:
-          self.log_output.append(f'<span style="color:red;">No row highlighted</span>')
-          return
-        self.batch_file_main_list[row]['recon_status'] = color
+            self.log_output.append(
+                '<span style="color:red;">_update_row: no row supplied</span>')
+            return
+        try:
+            self.batch_file_main_list[row]['recon_status'] = color
+        except (IndexError, KeyError):
+            return
         checkbox_widget = self.batch_file_main_table.cellWidget(row, 0)
         if checkbox_widget:
             checkbox_widget.setStyleSheet(f"QWidget {{ border-left: 6px solid {color}; }}")
@@ -4041,7 +4049,12 @@ class TomoGUI(QWidget):
         code = self.run_command_live(cmd, proj_file=proj_file, job_label="Try recon", wait=True, cuda_devices=gpu)
         try:
             if code == 0:
-                self._update_row(row=self.highlight_row,color='orange',status='Done try') #change table content and self.batch_file_list
+                # Resolve by filename so a click on another row during the
+                # run doesn't push "Done try" onto the wrong file.
+                status_row = self._find_row_by_filepath(proj_file)
+                if status_row is None:
+                    status_row = self.highlight_row
+                self._update_row(row=status_row, color='orange', status='Done try')
                 self.log_output.append(f'<span style="color:green;">Done try recon {proj_file}</span>')
                 return True
             else:
@@ -4192,8 +4205,12 @@ class TomoGUI(QWidget):
         self.cor_data[proj_file] = ai_cor_str
         if data_folder:
             self._save_cor_data(data_folder, self.cor_data)
-        if self.highlight_row is not None:
-            cor_widget = self.batch_file_main_table.cellWidget(self.highlight_row, 2)
+        # Write the AI COR into the row for THIS file, not the currently-
+        # highlighted one — the user may have clicked another file while
+        # the AI inference was running.
+        ai_row = self._find_row_by_filepath(proj_file)
+        if ai_row is not None:
+            cor_widget = self.batch_file_main_table.cellWidget(ai_row, 2)
             if cor_widget:
                 cor_widget.setText(ai_cor_str)
         self.log_output.append(
@@ -4203,7 +4220,10 @@ class TomoGUI(QWidget):
 
         self.log_output.append('Starting full reconstruction with AI COR…')
         QApplication.processEvents()
-        return self.full_reconstruction()
+        # Pin BOTH the file and the COR so the full-recon stage can't be
+        # retargeted by a mid-run click on another row.
+        return self.full_reconstruction(explicit_file=proj_file,
+                                        explicit_cor=ai_cor)
 
     # ------------------------------------------------------------------ #
     #  Sync Acquisition                                                    #
@@ -4525,12 +4545,22 @@ class TomoGUI(QWidget):
         else:
             self.full_btn.setEnabled(True)
 
-    def full_reconstruction(self):
+    def full_reconstruction(self, explicit_file=None, explicit_cor=None):
+        """Run a full reconstruction. Called both from the "Full" button and
+        from ``try_ai_reconstruction`` once the AI center search finishes.
+
+        ``explicit_file`` / ``explicit_cor`` let an async caller pin the
+        subject file + COR at the moment the job was initiated, so that if
+        the user clicks a different row during the (long) run, this method
+        still reconstructs the ORIGINAL file with the ORIGINAL COR instead
+        of silently re-targeting whatever is highlighted now. The "Full"
+        button leaves both None and we fall back to the live highlight.
+        """
         # STEP 1 (must be first, before anything else): blank the viewer
         # and flush the paint so the on-screen image is *visibly* gone
         # before we touch the H5 or launch tomocupy. Otherwise the display
         # keeps an NFS handle alive on the file we're about to overwrite.
-        proj_file = self.highlight_scan
+        proj_file = explicit_file or self.highlight_scan
         self._blank_viewer()
         QApplication.processEvents()
         self._release_full_h5_for_write(proj_file)
@@ -4545,18 +4575,31 @@ class TomoGUI(QWidget):
         try:
             pn = os.path.splitext(os.path.basename(proj_file))[0]
             recon_way = self.recon_way_box_full.currentText()
-            highlight_row = self.highlight_row
+            # Resolve the row for THIS file by filename — not self.highlight_row,
+            # which can drift if the user clicks another row mid-run.
+            target_row = self._find_row_by_filepath(proj_file)
             cor_method = self.cor_full_method.currentText()
             gpu = str(self.cuda_full_box.value())
             # One-shot VRAM guard (single-file Full, manual GPU pick).
             if not self._check_gpu_vram(int(gpu), "Local", os.path.basename(proj_file)):
                 return
             if cor_method == "manual":
-                try:
-                    cor_value = float(self.batch_file_main_list[self.highlight_row]['cor_input'].text().strip())
-                except ValueError:
-                  self.log_output.append('<span style="color:red;">[ERROR] Invalid Full COR value</span>')
-                  return
+                if explicit_cor is not None:
+                    # Caller already resolved the COR (typical for AI chain).
+                    cor_value = float(explicit_cor)
+                else:
+                    # Interactive "Full" click: read from the row that OWNS
+                    # this file, not whichever row is highlighted now.
+                    try:
+                        cor_src_row = (target_row if target_row is not None
+                                       else self.highlight_row)
+                        cor_value = float(self.batch_file_main_list[cor_src_row]
+                                          ['cor_input'].text().strip())
+                    except (ValueError, TypeError, IndexError, KeyError):
+                        self.log_output.append(
+                            '<span style="color:red;">[ERROR] Invalid Full '
+                            f'COR value for {os.path.basename(proj_file)}</span>')
+                        return
             if self.use_conf_box.isChecked():
                 self.log_output.append("You are using config file, only recon type, filename, rot axis from GUI")
                 config_text = self.config_editor_full.toPlainText()
@@ -4603,7 +4646,15 @@ class TomoGUI(QWidget):
                       status = f"Full ({info['kind']})"
                     else:
                         status = "Done full"
-                    self._update_row(row=self.highlight_row, color='green', status=status)
+                    # Re-resolve the row at completion time — a refresh may
+                    # have reshuffled rows while the job was running, and we
+                    # must still land the status on THIS file, not on the
+                    # one currently highlighted.
+                    status_row = (self._find_row_by_filepath(proj_file)
+                                  if proj_file else None)
+                    if status_row is None:
+                        status_row = target_row
+                    self._update_row(row=status_row, color='green', status=status)
                     self.log_output.append(f'<span style="color:green;">Done full recon {proj_file}</span>')
                     return True
                 else:
@@ -7620,6 +7671,14 @@ class TomoGUI(QWidget):
                 p.setProcessEnvironment(env)
             if cmd and cmd[0] != "env":
                 cmd = ["env", "HDF5_USE_FILE_LOCKING=FALSE"] + list(cmd)
+            # Log the exact command line we're about to spawn so the user
+            # can verify every tab setting reached tomocupy. One line per
+            # job, prefixed with the file name so parallel GPU slots stay
+            # grep-able in the log.
+            self.log_output.append(
+                f'<span style="color:#6c3483;">[cmd/{filename}]</span> '
+                + " ".join(str(a) for a in cmd)
+            )
             p.start(str(cmd[0]), [str(a) for a in cmd[1:]])
             if not p.waitForStarted(5000):
                 self.log_output.append(
@@ -7787,6 +7846,13 @@ class TomoGUI(QWidget):
         # in case the QProcess environment insert gets dropped somewhere.
         if cmd and cmd[0] != "env":
             cmd = ["env", "HDF5_USE_FILE_LOCKING=FALSE"] + list(cmd)
+
+        # Log the exact command (including every --flag that reached tomocupy)
+        # before spawning so the user can audit what the GUI actually sent.
+        self.log_output.append(
+            f'<span style="color:#6c3483;">[cmd/{filename}]</span> '
+            + " ".join(str(a) for a in cmd)
+        )
 
         # Start process
         p.start(str(cmd[0]), [str(a) for a in cmd[1:]])
