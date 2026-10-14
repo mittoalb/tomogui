@@ -2503,15 +2503,22 @@ class TomoGUI(QWidget):
                 "single-stage inference_pipeline (fine search mode).")
         add_check_f("--infer-use-8bits", default_checked=True,
                     tip="Requantize pixels to 8 bits before inference.")
+        # tomocupy's `list_of_floats` / `list_of_ints` CLI parsers want
+        # bare comma-separated values — passing "[1,2,4]" is rejected with
+        # `invalid list_of_floats value: '[1,2,4]'`. Placeholders & defaults
+        # must therefore be unbracketed.
         add_line_f("--infer-downsample-factor",
-                   placeholder="[1] or [1,2,4]",
-                   tip="List of downsample factors applied to try slices.")
+                   placeholder="1 or 1,2,4",
+                   tip="List of downsample factors applied to try slices "
+                       "(comma-separated, no brackets).")
         add_line_f("--infer-num-windows",
-                   placeholder="[3]",
-                   tip="Number of aggregation windows per slice.")
+                   placeholder="3",
+                   tip="Number of aggregation windows per slice "
+                       "(comma-separated, no brackets).")
         add_line_f("--infer-window-size",
-                   placeholder="[518]",
-                   tip="Square window size (DINOv2 native = 518).")
+                   placeholder="518",
+                   tip="Square window size (DINOv2 native = 518). "
+                       "Comma-separated, no brackets.")
         add_spin_f("--infer-seed-number", 0, 1_000_000, step=1, default=10,
                    tip="RNG seed for reproducibility.")
         add_combo_f("--infer-input-data-type", ["raw", "try"], default="raw",
@@ -2537,47 +2544,54 @@ class TomoGUI(QWidget):
                 "epoch_26.pt in TANGS's training checkpoint tree. "
                 "DIFFERENT architecture from the FINE model — do not "
                 "cross-wire the two paths.")
-        # Site defaults are a single coarse level: `[0.05]` + `[10]`. One
-        # level means tomocupy's `try_recon_ai_full` loop runs once (loop
-        # length = len(bin_sizes) = 1), skipping the biased Level 2 model.
-        # Level 1 picks a ~80 px bin in a ±404 px window around the seed,
-        # then the fine sub-stage inherits that range and searches ±40 px —
-        # wide enough that the FINE model has non-plateau candidates on
-        # both sides and picks a clear maximum instead of saturating.
+        # Site defaults are a single coarse level: `0.05` + `10`. One level
+        # means tomocupy's `try_recon_ai_full` loop runs once (loop length =
+        # len(bin_sizes) = 1), skipping the biased Level 2 model. Level 1
+        # picks a ~80 px bin in a ±404 px window around the seed, then the
+        # fine sub-stage inherits that range and searches ±40 px — wide
+        # enough that the FINE model has non-plateau candidates on both
+        # sides and picks a clear maximum instead of saturating.
         # HARD CONSTRAINT: both lists must have equal length (tomocupy
         # exits on mismatch). If you change one, change the other.
+        # NO BRACKETS — tomocupy's list parsers reject "[0.05]" with
+        # `invalid list_of_floats value`. Comma-separated bare values only.
         # include=False → shipped on every FULL run without needing a tick.
         add_line_b("--bin-infer-bin-sizes",
-                   placeholder="[0.05]",
-                   default_text="[0.05]",
+                   placeholder="0.05",
+                   default_text="0.05",
                    include=False,
                    tip="Bin width per coarse level, as a FRACTION of the "
-                       "detector width (0.0–1.0). Default [0.05] → 80.8 px "
-                       "per bin on a 1616-px detector, single-level search. "
-                       "Must have the same length as --bin-infer-bin-counts.")
+                       "detector width (0.0–1.0). Comma-separated, no "
+                       "brackets. Default 0.05 → 80.8 px per bin on a "
+                       "1616-px detector, single-level search. Must have "
+                       "the same length as --bin-infer-bin-counts.")
         add_line_b("--bin-infer-bin-counts",
-                   placeholder="[10]",
-                   default_text="[10]",
+                   placeholder="10",
+                   default_text="10",
                    include=False,
                    tip="Number of bins per coarse level. Must be even. "
-                       "Default [10] → 10 × 0.05 × detector = 50% of the "
-                       "detector width searched around the seed (±5 bins). "
-                       "Must have the same length as --bin-infer-bin-sizes.")
+                       "Comma-separated, no brackets. Default 10 → 10 × "
+                       "0.05 × detector = 50% of the detector width searched "
+                       "around the seed (±5 bins). Must have the same "
+                       "length as --bin-infer-bin-sizes.")
         add_spin_b("--bin-infer-num-frames", 1, 1024, step=1, default=2,
                    tip="Frames aggregated per bin.")
         add_line_b("--bin-infer-num-windows",
-                   placeholder="[10]",
-                   tip="Aggregation windows for bin inference.")
+                   placeholder="10",
+                   tip="Aggregation windows for bin inference "
+                       "(comma-separated, no brackets).")
         add_line_b("--bin-infer-window-size",
-                   placeholder="[518]",
-                   tip="Square window size for bin inference.")
+                   placeholder="518",
+                   tip="Square window size for bin inference "
+                       "(comma-separated, no brackets).")
         add_spin_b("--bin-infer-aggregator-depth", 1, 64, step=1, default=5,
                    tip="Attention layers in the feature aggregator.")
         add_spin_b("--bin-infer-aggregator-num-heads", 1, 64, step=1, default=12,
                    tip="Attention heads per layer.")
         add_line_b("--bin-infer-downsample-factor",
-                   placeholder="[1]",
-                   tip="Downsample factor applied to try slices (bin mode).")
+                   placeholder="1",
+                   tip="Downsample factor applied to try slices (bin mode) "
+                       "(comma-separated, no brackets).")
         add_combo_b("--bin-infer-input-data-type", ["raw", "try"], default="raw",
                     tip="Which cache the bin AI reads from.")
         add_spin_b("--bin-infer-seed-number", 0, 1_000_000, step=1, default=10,
