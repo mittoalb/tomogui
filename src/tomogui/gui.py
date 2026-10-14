@@ -2311,16 +2311,26 @@ class TomoGUI(QWidget):
         header_row.addWidget(method_label)
         method_combo = QComboBox()
         method_combo.addItems(["fine", "full"])
-        method_combo.setCurrentText("fine")
+        # Default to FULL paired with the single-level bin-infer defaults
+        # below. Two-level FULL has a reproducible tomocupy bug on this
+        # site's data (Level 2 picks off-center bins, fine sub-stage then
+        # saturates in the narrow window); the single-level config
+        # [0.05] + [10] catches a wide range at Level 1 and gives the fine
+        # sub-stage a ~±40 px window — big enough to escape the model's
+        # saturation plateau and pick cleanly. Users can flip to FINE from
+        # the combo for one-off runs.
+        method_combo.setCurrentText("full")
         method_combo.setToolTip(
             "fine: single-stage inference_pipeline (uses FINE model only).\n"
-            "full: two-stage bin_inference_pipeline (uses FULL model, "
-            "then falls back to FINE model for the final stage).")
+            "full: coarse search followed by fine refinement — pairs with "
+            "the --bin-infer-bin-sizes / --bin-infer-bin-counts settings "
+            "below. One-level default avoids the known two-level sub-stage "
+            "saturation on battery/NMC-style samples.")
         header_row.addWidget(method_combo)
         header_row.addStretch(1)
         host_layout.addLayout(header_row)
         # Register directly (no include checkbox) so _gather_ai_args emits it.
-        self.ai_widgets["--ai-search-method"] = ("combo", method_combo, None, "fine")
+        self.ai_widgets["--ai-search-method"] = ("combo", method_combo, None, "full")
 
         # Split: two group boxes side-by-side.
         split_row = QHBoxLayout()
@@ -2527,20 +2537,32 @@ class TomoGUI(QWidget):
                 "epoch_26.pt in TANGS's training checkpoint tree. "
                 "DIFFERENT architecture from the FINE model — do not "
                 "cross-wire the two paths.")
+        # Site defaults are a single coarse level: `[0.05]` + `[10]`. One
+        # level means tomocupy's `try_recon_ai_full` loop runs once (loop
+        # length = len(bin_sizes) = 1), skipping the biased Level 2 model.
+        # Level 1 picks a ~80 px bin in a ±404 px window around the seed,
+        # then the fine sub-stage inherits that range and searches ±40 px —
+        # wide enough that the FINE model has non-plateau candidates on
+        # both sides and picks a clear maximum instead of saturating.
+        # HARD CONSTRAINT: both lists must have equal length (tomocupy
+        # exits on mismatch). If you change one, change the other.
+        # include=False → shipped on every FULL run without needing a tick.
         add_line_b("--bin-infer-bin-sizes",
-                   placeholder="[0.05, 0.0125]",
-                   tip="Bin width per refinement stage, as a FRACTION of the "
-                       "detector width (0.0–1.0). Example on a 1616-px "
-                       "detector: 0.05 → 80.8 px per bin at Level 1, 0.0125 "
-                       "→ 20.2 px per bin at Level 2. Older tomocupy builds "
-                       "took absolute pixels here — stang292/develop rejects "
-                       "any value outside [0, 1].")
+                   placeholder="[0.05]",
+                   default_text="[0.05]",
+                   include=False,
+                   tip="Bin width per coarse level, as a FRACTION of the "
+                       "detector width (0.0–1.0). Default [0.05] → 80.8 px "
+                       "per bin on a 1616-px detector, single-level search. "
+                       "Must have the same length as --bin-infer-bin-counts.")
         add_line_b("--bin-infer-bin-counts",
-                   placeholder="[20, 4]",
-                   tip="Number of bins per refinement stage. Must be even. "
-                       "Larger = finer coarse pick but longer run time. "
-                       "Total search span at each stage = bin_count × "
-                       "bin_size × detector_width.")
+                   placeholder="[10]",
+                   default_text="[10]",
+                   include=False,
+                   tip="Number of bins per coarse level. Must be even. "
+                       "Default [10] → 10 × 0.05 × detector = 50% of the "
+                       "detector width searched around the seed (±5 bins). "
+                       "Must have the same length as --bin-infer-bin-sizes.")
         add_spin_b("--bin-infer-num-frames", 1, 1024, step=1, default=2,
                    tip="Frames aggregated per bin.")
         add_line_b("--bin-infer-num-windows",
