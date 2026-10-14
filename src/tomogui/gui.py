@@ -1323,9 +1323,18 @@ class TomoGUI(QWidget):
         return self.ai_infer_model_path.text().strip()
 
     def _read_ai_cor_from_try_dir(self, proj_file):
-        """Read the last value written to center_of_rotation.txt inside the
-        try output directory for ``proj_file``. Returns the COR as a float
-        on success, or ``None`` if the file is missing/empty/unparseable."""
+        """Read the AI-chosen COR for ``proj_file`` out of
+        ``<data>_rec/try_center/<proj>/center_of_rotation.txt``. Returns a
+        float on success, or ``None`` if the file is missing/empty/unparseable.
+
+        tomocupy writes this file in ``append`` mode and dumps EVERY candidate
+        centre that tied for the maximum score — one per line — then returns
+        ``np.mean(tied_centres)`` in memory (see tomocupy/ai/inference.py).
+        So the last line is NOT the final answer; it is just the smallest of
+        the tied candidates. We must reproduce the mean here, otherwise the
+        follow-up full recon runs at the lower bound of the tied range (seen
+        on sample 1167: file contains 823.0…801.5, in-memory ``set rotation
+        axis 812.25`` = mean of those two bounds)."""
         data_folder = self.data_path.text().strip()
         if not data_folder:
             return None
@@ -1336,11 +1345,23 @@ class TomoGUI(QWidget):
             return None
         try:
             with open(cor_txt) as fh:
-                lines = [ln.strip() for ln in fh if ln.strip()]
-            if not lines:
+                raw = [ln.strip() for ln in fh if ln.strip()]
+            if not raw:
                 return None
-            return float(lines[-1].split()[-1])
-        except (OSError, ValueError):
+            vals = []
+            for ln in raw:
+                try:
+                    # Keep .split()[-1] so historical single-line files
+                    # ("<label>: <value>") still parse correctly, but iterate
+                    # every line and average because tomocupy emits one line
+                    # per tied candidate centre.
+                    vals.append(float(ln.split()[-1]))
+                except ValueError:
+                    continue
+            if not vals:
+                return None
+            return sum(vals) / len(vals)
+        except OSError:
             return None
 
     def _gather_params_args(self):
@@ -6253,16 +6274,53 @@ class TomoGUI(QWidget):
           self.refresh_main_table()
 
     def _select_done_try(self):
+        """Tick every row whose status cell says "Done try".
+
+        file_info['status'] is historically inconsistent — the initial
+        populate stored a QTableWidgetItem, but every status-update path
+        since then has either a QTableWidgetItem OR a plain string. Read
+        from the live table cell instead of trusting the dict, and guard
+        against rows whose widgets have gone away (closed table, etc.).
+        """
         found = False
         for file_info in self.batch_file_main_list:
-            status = file_info['status'].text().strip()
+            status = self._status_text_of(file_info)
             if status == "Done try":
-                file_info['checkbox'].setChecked(True)
+                try:
+                    file_info['checkbox'].setChecked(True)
+                except (RuntimeError, KeyError, AttributeError):
+                    continue
                 found = True
         if not found:
-            self.log_output.append(f"No file is in Done try state")
+            self.log_output.append("No file is in 'Done try' state")
         else:
-            self.log_output.append(f"Select all files done try")
+            self.log_output.append("Selected all files in 'Done try' state")
+
+    def _status_text_of(self, file_info):
+        """Return the current status cell text for ``file_info`` as a str,
+        or '' if we can't read it. Looks up the live QTableWidgetItem by
+        row (authoritative) and falls back to whatever is cached in
+        file_info['status'] (which may be a QTableWidgetItem or a plain
+        string depending on which code path last wrote it)."""
+        # Prefer the live table cell — it survives dict-side inconsistency.
+        try:
+            row = file_info.get('row')
+            if row is not None:
+                item = self.batch_file_main_table.item(int(row), 3)
+                if item is not None:
+                    return item.text().strip()
+        except (RuntimeError, AttributeError, ValueError, TypeError):
+            pass
+        # Fallback: whatever is in the dict (may be a str or a QTableWidgetItem).
+        raw = file_info.get('status')
+        if raw is None:
+            return ''
+        if isinstance(raw, str):
+            return raw.strip()
+        try:
+            return raw.text().strip()
+        except (RuntimeError, AttributeError):
+            return ''
 
     # def _batch_view_try(self, file_path):
     #    """View try reconstruction for a specific file"""
