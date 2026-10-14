@@ -383,6 +383,16 @@ class TomoGUI(QWidget):
         view_try_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
         view_try_btn.clicked.connect(self.view_try_reconstruction)
         single_ops.addWidget(view_try_btn)
+        # AI Reco used to live on its own row below Try with just a stretch
+        # — one button per line wasted vertical space. Dropped inline here,
+        # right after View, since AI Reco starts with a Try reconstruction.
+        # Model paths are configured on the AI COR tab.
+        try_ai_btn = QPushButton(" AI Reco ")
+        try_ai_btn.setStyleSheet("QPushButton { font-size: 11pt; font-weight:bold; color: #1a8cff; }")
+        try_ai_btn.setToolTip("Run Try reconstruction, find best COR via AI, then run Full reconstruction.\n"
+                              "Model paths are configured on the AI COR tab.")
+        try_ai_btn.clicked.connect(self.try_ai_reconstruction)
+        single_ops.addWidget(try_ai_btn)
         single_ops.addStretch(1)
         clear_log_btn = QPushButton(" Clear Log ")
         clear_log_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
@@ -391,26 +401,11 @@ class TomoGUI(QWidget):
         single_ops.addWidget(clear_log_btn)
         main_tab.addLayout(single_ops)
 
-        # Row 1b - Try AI (tomocor inference). The AI model paths live on the
-        # AI COR tab (fine + full each own a --*-model-path field there); this
-        # row only exposes the launch button so the top area stays uncluttered.
-        ai_ops = QHBoxLayout()
-        ai_ops.setSpacing(6)
-        ai_ops.addStretch(1)
-        try_ai_btn = QPushButton("  AI Reco  ")
-        try_ai_btn.setStyleSheet("QPushButton { font-size: 11pt; font-weight:bold; color: #1a8cff; }")
-        try_ai_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        try_ai_btn.setToolTip("Run Try reconstruction, find best COR via AI, then run Full reconstruction.\n"
-                              "Model paths are configured on the AI COR tab.")
-        try_ai_btn.clicked.connect(self.try_ai_reconstruction)
-        ai_ops.addWidget(try_ai_btn)
-        main_tab.addLayout(ai_ops)
-
         h_line = QFrame()
-        h_line.setFrameShape(QFrame.HLine)  # Vertical line
+        h_line.setFrameShape(QFrame.HLine)
         h_line.setFrameShadow(QFrame.Sunken)
         main_tab.addWidget(h_line)
-        
+
         # Row 2 - Full part single file operation (same compaction).
         single_full_ops = QHBoxLayout()
         single_full_ops.setSpacing(4)
