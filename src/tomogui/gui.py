@@ -1196,37 +1196,37 @@ class TomoGUI(QWidget):
                 w.setToolTip(tip)
             _add_row(flag, "dspin", w, default=default, include=include)
 
-        add_combo("--binning", ["0","1","2","3"], default="0", include=False) #always include
+        add_combo("--binning", ["0","1","2","3"], default="0") #opt-in via checkbox
 
 
-        add_combo("--file-type", ["standard","double_fov"], default="standard", include=False) #always include
+        add_combo("--file-type", ["standard","double_fov"], default="standard") #opt-in via checkbox
 
 
-        add_dspin("--bright-ratio", 0.0, 1e9, step=0.1, default=1.0, include=False) #always include
-        add_dspin("--center-search-step", 0.0, 1e6, step=0.05, default=0.5, include=False) #always include
-        add_dspin("--center-search-width", 0.0, 1e6, step=0.5, default=50.0, include=False) #always include
-        add_spin("--dezinger", 0, 10000, step=1, default=5, include=False) #always include
+        add_dspin("--bright-ratio", 0.0, 1e9, step=0.1, default=1.0) #opt-in via checkbox
+        add_dspin("--center-search-step", 0.0, 1e6, step=0.05, default=0.5) #opt-in via checkbox
+        add_dspin("--center-search-width", 0.0, 1e6, step=0.5, default=50.0) #opt-in via checkbox
+        add_spin("--dezinger", 0, 10000, step=1, default=5) #opt-in via checkbox
         add_spin("--dezinger-threshold", 0, 1000000, step=100, default=5000) 
 
-        add_combo("--fbp-filter", ["none","ramp","shepp","hann","hamming","parzen","cosine","cosine2"], default="parzen", include=False) #always include
-        add_spin("--find-center-end-row", -1, 10_000_000, step=1, default=-1, include=False) #always include
-        add_spin("--find-center-start-row", 0, 10_000_000, step=1, default=0, include=False) #always include
-        add_combo("--flat-linear", ["False","True"], default="False", include=False) #always include
+        add_combo("--fbp-filter", ["none","ramp","shepp","hann","hamming","parzen","cosine","cosine2"], default="parzen") #opt-in via checkbox
+        add_spin("--find-center-end-row", -1, 10_000_000, step=1, default=-1) #opt-in via checkbox
+        add_spin("--find-center-start-row", 0, 10_000_000, step=1, default=0) #opt-in via checkbox
+        add_combo("--flat-linear", ["False","True"], default="False") #opt-in via checkbox
 
-        add_combo("--minus-log", ["True","False"], default="True", include=False) #always include
+        add_combo("--minus-log", ["True","False"], default="True") #opt-in via checkbox
 
-        add_line("--nsino", "", include=False) #always include
-        #add_line("--nsino", "0.5 or [0,0.9]", include=False) #always include
+        add_line("--nsino", "") #opt-in via checkbox
+        #add_line("--nsino", "0.5 or [0,0.9]") #opt-in via checkbox
 #       add_dspin("--rotation-axis", -1e9, 1e9, step=0.01, default=-1.0)
 #       add_combo("--rotation-axis-auto", ["manual","auto"], default="manual")
-        add_combo("--rotation-axis-method", ["sift","vo"], default="sift", include=False) #always include
+        add_combo("--rotation-axis-method", ["sift","vo"], default="sift") #opt-in via checkbox
         add_line("--rotation-axis-pairs", "[0,1499] or [0,1499,749,2249]")
         add_dspin("--rotation-axis-sift-threshold", 0.0, 1.0, step=0.01, default=0.5)
 
 
         # Misc / algorithm
-        add_combo("--pre-processing", ["True","False"], default="True", include=False) #always include
-        add_combo("--reconstruction-algorithm", ["fourierrec","linerec"], default="fourierrec", include=False) #always include
+        add_combo("--pre-processing", ["True","False"], default="True") #opt-in via checkbox
+        add_combo("--reconstruction-algorithm", ["fourierrec","linerec"], default="fourierrec") #opt-in via checkbox
 
         self.tabs.addTab(params_tab, "Reconstruction")
 
@@ -1813,7 +1813,7 @@ class TomoGUI(QWidget):
 
         # Stripe/ring filters — default to 'fw' (Fourier-wavelet) so the most
         # commonly-used ring removal is active out of the box.
-        add_combo("--remove-stripe-method", ["none","fw","ti","vo-all"], default="fw", include=False) #always include
+        add_combo("--remove-stripe-method", ["none","fw","ti","vo-all"], default="fw") #opt-in via checkbox
         add_combo("--fw-filter", ["haar","db5","sym5","sym16"], default="sym16")
         add_spin("--fw-level", 0, 64, step=1, default=7)
         add_check("--fw-pad")
@@ -2102,10 +2102,10 @@ class TomoGUI(QWidget):
         add_line("--dark-file-name", "/path/dark.h5")
         add_line("--flat-file-name", "/path/flat.h5")
         add_line("--out-path-name", "/path/out")
-        add_combo("--save-format", ["h5nolinks","h5","h5sino","tiff"], default="h5nolinks", include=False) #always include; matches tomocupy default
+        add_combo("--save-format", ["h5nolinks","h5","h5sino","tiff"], default="h5nolinks") #opt-in via checkbox
         add_check("--config-update")
-        add_line("--logs-home", "/home/user/logs", include=False) #always include
-        add_check("--verbose", include=False) #always include
+        add_line("--logs-home", "/home/user/logs") #opt-in via checkbox
+        add_check("--verbose") #opt-in via checkbox
         
         self.tabs.addTab(Data_tab, "Data")
 
@@ -2243,18 +2243,18 @@ class TomoGUI(QWidget):
         # Perfomance related settings
         # Clear output folder before each run — always included, defaults True so
         # stale partial reconstructions don't linger; user can flip to False.
-        add_combo("--clear-folder", ["False","True"], default="True", include=False)
-        add_combo("--dtype", ["float32","float16"], default="float32", include=False) #always include
-        add_spin("--start-column", 0, 10_000_000, step=1, default=0, include=False) #always include
-        add_spin("--end-column", -1, 10_000_000, step=1, default=-1, include=False) #always include
-        add_spin("--start-proj", 0, 10_000_000, step=1, default=0, include=False) #always include
-        add_spin("--end-proj", -1, 10_000_000, step=1, default=-1, include=False) #always include
-        add_spin("--start-row", 0, 10_000_000, step=1, default=0, include=False) #always include
-        add_spin("--end-row", -1, 10_000_000, step=1, default=-1, include=False) #always include
-        add_spin("--nproj-per-chunk", 1, 65535, step=1, default=8, include=False) #always include      
-        add_spin("--nsino-per-chunk", 1, 65535, step=1, default=8, include=False) #always include      
-        add_spin("--max-read-threads", 1, 1024, step=1, default=4, include=False) #always include
-        add_spin("--max-write-threads", 1, 1024, step=1, default=8, include=False) #always include      
+        add_combo("--clear-folder", ["False","True"], default="True")
+        add_combo("--dtype", ["float32","float16"], default="float32") #opt-in via checkbox
+        add_spin("--start-column", 0, 10_000_000, step=1, default=0) #opt-in via checkbox
+        add_spin("--end-column", -1, 10_000_000, step=1, default=-1) #opt-in via checkbox
+        add_spin("--start-proj", 0, 10_000_000, step=1, default=0) #opt-in via checkbox
+        add_spin("--end-proj", -1, 10_000_000, step=1, default=-1) #opt-in via checkbox
+        add_spin("--start-row", 0, 10_000_000, step=1, default=0) #opt-in via checkbox
+        add_spin("--end-row", -1, 10_000_000, step=1, default=-1) #opt-in via checkbox
+        add_spin("--nproj-per-chunk", 1, 65535, step=1, default=8) #opt-in via checkbox
+        add_spin("--nsino-per-chunk", 1, 65535, step=1, default=8) #opt-in via checkbox
+        add_spin("--max-read-threads", 1, 1024, step=1, default=4) #opt-in via checkbox
+        add_spin("--max-write-threads", 1, 1024, step=1, default=8) #opt-in via checkbox
 
   
         self.tabs.addTab(Performance_tab, "Performance")
