@@ -2324,13 +2324,21 @@ class TomoGUI(QWidget):
         host_layout.addLayout(split_row)
         host_layout.addStretch(1)
 
-        # Site-default FINE checkpoint (fine_v2.pt shipped with the tomoguiAI
-        # conda env at USERTXM). FULL has no shipped weights yet, so its field
-        # is left blank until the user picks one.
+        # Site-default checkpoints. They are DIFFERENT files — the FINE and
+        # FULL searches use structurally different model architectures
+        # (FULL adds the feature-aggregator layers), so loading one as the
+        # other crashes tomocupy out of the coarse stage before the fine
+        # stage can run.
+        #   FINE  -- fine_v2.pt shipped with the tomoguiAI conda env.
+        #   FULL  -- epoch_26.pt in TANGS's training checkpoint tree
+        #            (world-readable). Point this at a newer checkpoint when
+        #            one becomes authoritative.
         _default_fine_model = ("/home/beams/USERTXM/conda/anaconda/envs/"
                                "tomoguiAI/lib/python3.11/site-packages/"
                                "tomogui/AImodels/fine_v2.pt")
-        _default_full_model = ""
+        _default_full_model = ("/home/beams/TANGS/conda/tomocor_models/"
+                               "2026_09_24-11_37_44-model_ViT-L-16-lr_2e-05-"
+                               "b_2-j_4-p_amp/checkpoints/epoch_26.pt")
 
         def make_helpers(form):
             """Return (add_line, add_combo, add_check, add_spin, add_path) that
@@ -2493,10 +2501,12 @@ class TomoGUI(QWidget):
         # ---- FULL (--bin-infer-*) column --------------------------------
         self.ai_bin_infer_model_path = add_path_b(
             "--bin-infer-model-path", default_text=_default_full_model,
-            placeholder="Path to FULL model weights (.pth/.pt) — none shipped yet",
+            placeholder="Path to FULL model weights (.pth/.pt)",
             tip="Path to the FULL model checkpoint used by the two-stage "
-                "bin_inference_pipeline (full search mode). No default is "
-                "shipped yet; leave blank until a full model is provided.")
+                "bin_inference_pipeline (full search mode). Default: "
+                "epoch_26.pt in TANGS's training checkpoint tree. "
+                "DIFFERENT architecture from the FINE model — do not "
+                "cross-wire the two paths.")
         add_line_b("--bin-infer-bin-sizes",
                    placeholder="[24,12]",
                    tip="Pixel step per bin per refinement stage.")
