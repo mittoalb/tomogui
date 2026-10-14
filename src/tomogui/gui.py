@@ -4709,7 +4709,10 @@ class TomoGUI(QWidget):
         """Deselect all files in the batch list"""
         for file_info in self.batch_file_main_list:
             file_info['checkbox'].setChecked(False)
-            self.log_output.append(f'<span style="color:green;">Unselect all files in table</span>')
+        # Previously logged ONCE PER FILE inside the loop — a 1000-row
+        # table meant 1000 identical log lines on a single click.
+        self.log_output.append(
+            '<span style="color:green;">Unselect all files in table</span>')
 
     def _get_batch_machine_command(self, cmd, machine):
         """
@@ -7336,11 +7339,22 @@ class TomoGUI(QWidget):
 
         progress_window_opened = False  #gate progress window
 
-        # Keep processing until queue is empty and all jobs are done
+        # Keep processing until queue is empty and all jobs are done.
+        # Previously this loop logged a "Queue loop: N queued, M running"
+        # line on EVERY iteration (every ~200 ms), flooding the log with
+        # hundreds of identical heartbeats. Only log when the counters
+        # actually change — the queue-overview window is the live view.
+        _last_counts = None
         while self.batch_job_queue or self.batch_running_jobs:
-            self.log_output.append(
-              f'<span style="color:gray;">🔄 Queue loop: {len(self.batch_job_queue)} queued, {len(self.batch_running_jobs)} running, {len(self.batch_available_gpus)} GPUs available</span>'
-            )
+            counts = (len(self.batch_job_queue),
+                      len(self.batch_running_jobs),
+                      len(self.batch_available_gpus))
+            if counts != _last_counts:
+                self.log_output.append(
+                    f'<span style="color:gray;">🔄 Queue: '
+                    f'{counts[0]} queued, {counts[1]} running, '
+                    f'{counts[2]} GPUs free</span>')
+                _last_counts = counts
             QApplication.processEvents()
 
             # Start new jobs if GPUs are available and jobs are queued
@@ -7879,13 +7893,33 @@ class TomoGUI(QWidget):
         )
         return p
 
+    # Lines from tomocupy's stdout that we DON'T need to repeat in the GUI
+    # log. They still reach the launching terminal (sys.stdout/sys.stderr)
+    # for anyone debugging — we just stop them from drowning the log widget.
+    # - "key: value" lines are tomocupy's full args dump, ~100 lines per
+    #   invocation, and we already print the exact command via [cmd/<file>].
+    # - "queue size NNN | |...| X.X%" are the per-chunk progress bars.
+    # - "Saving log at …" / "Clearing the output folder" / rm-cannot-remove
+    #   are startup noise.
+    _TOMOCUPY_NOISE_PATTERNS = (
+        __import__("re").compile(r"queue size\s*\d+\s*\|"),
+        __import__("re").compile(r"^\s*\d{4}-\d{2}-\d{2}[^-]*- [a-z0-9][a-z0-9_-]*: "),
+        __import__("re").compile(r"^\s*\d{4}-\d{2}-\d{2}[^-]*- Saving log at "),
+        __import__("re").compile(r"^\s*\d{4}-\d{2}-\d{2}[^-]*- Clearing the output folder"),
+        __import__("re").compile(r"^\s*rm: cannot remove "),
+        __import__("re").compile(r"^\s*Downsample factor is \d+\. No resizing applied"),
+        __import__("re").compile(r"^\s*Requantizing using \d+ bits"),
+    )
+
     def _on_process_output(self, process, filename, is_error=False):
         """Handle stdout/stderr from batch reconstruction processes.
 
         Mirrors the child process's output to BOTH the GUI log panel and
         the parent terminal (sys.stdout / sys.stderr). Users running tomogui
         from a shell expect to see tomocupy progress in that shell, not just
-        in the GUI's log widget.
+        in the GUI's log widget. The GUI log drops obvious noise (args
+        dumps, progress bars, …) because [cmd/<file>] already shows the
+        full invocation and the queue window shows live status.
         """
         import sys
         if is_error:
@@ -7901,17 +7935,27 @@ class TomoGUI(QWidget):
             return
 
         basename = os.path.basename(filename)
+        # Terminal gets everything (unchanged) — that's where power users
+        # debug. The GUI log gets a filtered subset.
         try:
             sink.write(data if data.endswith("\n") else data + "\n")
             sink.flush()
         except (OSError, ValueError):
             pass
 
+        def _is_noise(line):
+            for pat in self._TOMOCUPY_NOISE_PATTERNS:
+                if pat.search(line):
+                    return True
+            return False
+
         for line in data.strip().split('\n'):
-            if line.strip():
-                self.log_output.append(
-                    f'<span style="color:{color};">[{basename}] {line}</span>'
-                )
+            s = line.strip()
+            if not s or _is_noise(s):
+                continue
+            self.log_output.append(
+                f'<span style="color:{color};">[{basename}] {s}</span>'
+            )
 
     def _set_cor_cell(self, file_info, cor_val):
         """Robustly update a batch-table row's COR cell. Returns True iff
