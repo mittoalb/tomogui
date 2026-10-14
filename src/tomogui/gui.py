@@ -7118,7 +7118,13 @@ class TomoGUI(QWidget):
                         f"{data_folder}_rec", "try_center",
                         proj_name, 'center_of_rotation.txt')
 
-                    # Read the AI's answer
+                    # Read the AI's answer. Delegating to the shared helper
+                    # so there is ONE place that knows the file holds every
+                    # tied-max candidate (one per line) and we must return
+                    # the MEAN — not the last line. The previous inline
+                    # `float(raw[-1].split()[-1])` here silently gave Phase
+                    # C the smallest tied candidate (e.g. 807.5 instead of
+                    # tomocupy's 818.25 mean on sample 724).
                     if not os.path.exists(cor_txt):
                         failed_inf.append(basename)
                         self.log_output.append(
@@ -7126,17 +7132,12 @@ class TomoGUI(QWidget):
                             f'no center_of_rotation.txt</span>'
                         )
                         continue
-                    try:
-                        with open(cor_txt) as f:
-                            raw = [ln.strip() for ln in f if ln.strip()]
-                        if not raw:
-                            raise ValueError("empty file")
-                        ai_cor = float(raw[-1].split()[-1])
-                    except Exception as e:
+                    ai_cor = self._read_ai_cor_from_try_dir(proj_file)
+                    if ai_cor is None:
                         failed_inf.append(basename)
                         self.log_output.append(
                           f'<span style="color:red;"> {basename}: '
-                            f'could not parse {cor_txt} ({e})</span>'
+                            f'could not parse {cor_txt}</span>'
                         )
                         continue
 
