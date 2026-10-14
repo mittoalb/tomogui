@@ -293,31 +293,39 @@ class TomoGUI(QWidget):
         # ==== LEFT PANEL ====
         left_layout = QVBoxLayout()
 
-        # Data folder
+        # Data folder — path LineEdit stretches; the fixed 580 px it used
+        # to carry was forcing the Browse / Refresh buttons off the right
+        # edge on anything narrower than ~1200 px.
         folder_layout = QHBoxLayout()
         df_label = QLabel("Data Folder:")
         df_label.setStyleSheet("QLabel { font-size: 10.5pt; }")
         folder_layout.addWidget(df_label)
         self.data_path = QLineEdit()
-        self.data_path.setFixedWidth(580)
+        self.data_path.setMinimumWidth(200)
+        self.data_path.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.data_path.setStyleSheet("QLineEdit { font-size: 10.5pt; }")
-        folder_layout.addWidget(self.data_path)
-        browse_btn = QPushButton(" Browse Data Folder ")
+        folder_layout.addWidget(self.data_path, 1)
+        browse_btn = QPushButton("Browse")
         browse_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
-        browse_btn.setToolTip(f"Find folder, update from files status and rot_cen.json")
+        browse_btn.setToolTip("Find folder, update from files status and rot_cen.json")
         browse_btn.clicked.connect(self.browse_data_folder)
         folder_layout.addWidget(browse_btn)
-        refresh_btn2 = QPushButton("     Refresh     ")
+        refresh_btn2 = QPushButton("Refresh")
         refresh_btn2.setStyleSheet("QPushButton { font-size: 10.5pt; }")
-        refresh_btn2.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         refresh_btn2.clicked.connect(self.refresh_main_table)
-        refresh_btn2.setToolTip(f"Update from files status and rot_cen.json")
+        refresh_btn2.setToolTip("Update from files status and rot_cen.json")
         folder_layout.addWidget(refresh_btn2)
         left_layout.addLayout(folder_layout)
 
         # ==== TABS (Configs + Params) ====
         self.tabs = QTabWidget()
-        left_layout.addWidget(self.tabs)        
+        # Enable the chevron scroll buttons on the tab bar and allow Elide
+        # so tabs that can't all fit (e.g. "Advanced Config", "AI COR" on a
+        # narrow left panel) remain reachable instead of being clipped off
+        # the right edge.
+        self.tabs.setUsesScrollButtons(True)
+        self.tabs.setElideMode(Qt.ElideRight)
+        left_layout.addWidget(self.tabs)
         
         first_tab = QWidget()
         self.tabs.addTab(first_tab, "Main")
@@ -325,61 +333,60 @@ class TomoGUI(QWidget):
         #==========main tab may===================
         main_tab = QVBoxLayout(first_tab)
         main_tab.setSpacing(6)
-        #Row 1 - Try part single file operation
+        #Row 1 - Try part single file operation.
+        # Tightened spacing + narrower combos + no Expanding Try button so
+        # the row doesn't push View/Clear off the right edge on a narrow
+        # left panel. The 11pt bold Try button stays visually prominent
+        # via style, not by eating all the remaining space.
         single_ops = QHBoxLayout()
-        single_ops.setSpacing(10)
-        label_try = QLabel("Try method")
-        label_try.setStyleSheet("QLabel { font-size: 10.5pt; }")
-        label_try.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        single_ops.setSpacing(4)
+        label_try = QLabel("Try")
+        label_try.setStyleSheet("QLabel { font-size: 10.5pt; font-weight:bold; }")
         single_ops.addWidget(label_try)
         self.recon_way_box = QComboBox()
-        self.recon_way_box.setFixedWidth(100)
+        self.recon_way_box.setFixedWidth(96)
         self.recon_way_box.setStyleSheet("QComboBox { font-size: 10.5pt; }")
         self.recon_way_box.addItems(["recon","recon_steps"])
         self.recon_way_box.setCurrentIndex(0) # make recon as default
         single_ops.addWidget(self.recon_way_box)
-        cor_method_label = QLabel("COR method")
+        cor_method_label = QLabel("COR")
         cor_method_label.setStyleSheet("QLabel { font-size: 10.5pt; }")
         single_ops.addWidget(cor_method_label)
         self.cor_method_box = QComboBox()
-        self.cor_method_box.setFixedWidth(85)
+        self.cor_method_box.setFixedWidth(70)
         self.cor_method_box.setStyleSheet("QComboBox { font-size: 10.5pt; }")
         self.cor_method_box.addItems(["auto","manual"])
         self.cor_method_box.setCurrentIndex(1) # make manual as default
         single_ops.addWidget(self.cor_method_box)
-        cor_label = QLabel("COR")
+        cor_label = QLabel("val")
         cor_label.setStyleSheet("QLabel { font-size: 10.5pt; }")
         single_ops.addWidget(cor_label)
         self.cor_input = QLineEdit()
-        self.cor_input.setFixedWidth(55)
+        self.cor_input.setFixedWidth(60)
         self.cor_input.setStyleSheet("QLineEdit { font-size: 10.5pt; }")
         single_ops.addWidget(self.cor_input)
-        cuda_label = QLabel("cuda")
+        cuda_label = QLabel("GPU")
         cuda_label.setStyleSheet("QLabel { font-size: 10.5pt; }")
         single_ops.addWidget(cuda_label)
         self.cuda_box_try = QSpinBox()
         self.cuda_box_try.setMinimum(0)
         self.cuda_box_try.setMaximum(1)
         self.cuda_box_try.setValue(0)
-        self.cuda_box_try.setFixedWidth(52)
+        self.cuda_box_try.setFixedWidth(44)
         self.cuda_box_try.setStyleSheet("QSpinBox { font-size: 10.5pt; }")
         single_ops.addWidget(self.cuda_box_try)
-        try_btn = QPushButton("  Try  ")
+        try_btn = QPushButton(" Try ")
         try_btn.setStyleSheet("QPushButton { font-size: 11pt; font-weight:bold; }")
-        try_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         try_btn.clicked.connect(self.try_reconstruction)
         single_ops.addWidget(try_btn)
-        view_try_btn = QPushButton("  View Try  ")
+        view_try_btn = QPushButton(" View ")
         view_try_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
-        view_try_btn.clicked.connect(self.view_try_reconstruction) 
+        view_try_btn.clicked.connect(self.view_try_reconstruction)
         single_ops.addWidget(view_try_btn)
-        single_ops.setStretch(0,0)
-        separator = QLabel(" | ")
-        separator.setStyleSheet("QLabel { font-size: 11pt; }")
-        single_ops.addWidget(separator)
-        clear_log_btn = QPushButton(" clear Log ")
+        single_ops.addStretch(1)
+        clear_log_btn = QPushButton(" Clear Log ")
         clear_log_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
-        clear_log_btn.setEnabled(True) #enable
+        clear_log_btn.setEnabled(True)
         clear_log_btn.clicked.connect(self.clear_log)
         single_ops.addWidget(clear_log_btn)
         main_tab.addLayout(single_ops)
@@ -404,58 +411,54 @@ class TomoGUI(QWidget):
         h_line.setFrameShadow(QFrame.Sunken)
         main_tab.addWidget(h_line)
         
-        # Row 2 - Full part single file operation
+        # Row 2 - Full part single file operation (same compaction).
         single_full_ops = QHBoxLayout()
-        single_full_ops.setSpacing(10)
-        label_full = QLabel("Full method")
-        label_full.setStyleSheet("QLabel { font-size: 10.5pt; }")
-        label_full.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        single_full_ops.setSpacing(4)
+        label_full = QLabel("Full")
+        label_full.setStyleSheet("QLabel { font-size: 10.5pt; font-weight:bold; }")
         single_full_ops.addWidget(label_full)
         self.recon_way_box_full = QComboBox()
-        self.recon_way_box_full.setFixedWidth(99)
+        self.recon_way_box_full.setFixedWidth(96)
         self.recon_way_box_full.setStyleSheet("QComboBox { font-size: 10.5pt; }")
         self.recon_way_box_full.addItems(["recon","recon_steps"])
         self.recon_way_box_full.setCurrentIndex(0) # make recon as default
         single_full_ops.addWidget(self.recon_way_box_full)
-        cor_method_full_label = QLabel("COR method")
+        cor_method_full_label = QLabel("COR")
         cor_method_full_label.setStyleSheet("QLabel { font-size: 10.5pt; }")
         single_full_ops.addWidget(cor_method_full_label)
         self.cor_full_method = QComboBox()
-        self.cor_full_method.setFixedWidth(85)
+        self.cor_full_method.setFixedWidth(70)
         self.cor_full_method.setStyleSheet("QComboBox { font-size: 10.5pt; }")
         self.cor_full_method.addItems(["auto","manual"])
         self.cor_full_method.setCurrentIndex(1) # make manual as default
         single_full_ops.addWidget(self.cor_full_method)
-        rec_cor_btn = QPushButton("  Add COR  ")
+        rec_cor_btn = QPushButton(" Add COR ")
         rec_cor_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
         rec_cor_btn.clicked.connect(self.record_cor_main_tb)
         single_full_ops.addWidget(rec_cor_btn)
-        cuda_full_label = QLabel("cuda")
+        cuda_full_label = QLabel("GPU")
         cuda_full_label.setStyleSheet("QLabel { font-size: 10.5pt; }")
         single_full_ops.addWidget(cuda_full_label)
         self.cuda_full_box = QSpinBox()
         self.cuda_full_box.setMinimum(0)
         self.cuda_full_box.setMaximum(1)
         self.cuda_full_box.setValue(0)
-        self.cuda_full_box.setFixedWidth(52)
+        self.cuda_full_box.setFixedWidth(44)
         self.cuda_full_box.setStyleSheet("QSpinBox { font-size: 10.5pt; }")
-        single_full_ops.addWidget(self.cuda_full_box) 
-        self.full_btn = QPushButton("    Full    ")
-        self.full_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        single_full_ops.addWidget(self.cuda_full_box)
+        self.full_btn = QPushButton(" Full ")
         self.full_btn.setStyleSheet("QPushButton { font-size: 11pt; font-weight:bold; }")
         self.full_btn.clicked.connect(self.full_reconstruction)
         single_full_ops.addWidget(self.full_btn)
-        self.view_btn = QPushButton("  View Full  ")
+        self.view_btn = QPushButton(" View Full ")
         self.view_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
         self.view_btn.setEnabled(True)
         self.view_btn.clicked.connect(self.view_full_reconstruction)
         single_full_ops.addWidget(self.view_btn)
-        separator_full = QLabel(" | ")
-        separator_full.setStyleSheet("QLabel { font-size: 11pt; }")
-        single_full_ops.addWidget(separator_full)
-        save_log_btn = QPushButton(" save Log ")
+        single_full_ops.addStretch(1)
+        save_log_btn = QPushButton(" Save Log ")
         save_log_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
-        save_log_btn.setEnabled(True) #enable
+        save_log_btn.setEnabled(True)
         save_log_btn.clicked.connect(self.save_log)
         single_full_ops.addWidget(save_log_btn)
         main_tab.addLayout(single_full_ops)
@@ -541,41 +544,41 @@ class TomoGUI(QWidget):
         self.batch_file_main_table.setColumnWidth(5, 140)  # Pixel
         self.batch_file_main_table.setColumnWidth(6, 100)  # View Data
         main_tab.addWidget(self.batch_file_main_table)
-        #Row 5: batch process operations
-        batch_ops = QHBoxLayout()
-        batch_ops.setSpacing(5)
-        batch_label = QLabel("Batch process ")
+        # Row 5: batch process operations — SPLIT into three rows so the
+        # ~27 widgets stop queueing off the right edge of a narrow panel.
+        #   Row 5a: machine / resources / queue window
+        #   Row 5b: selection + batch run buttons + AI-phase checkboxes
+        #   Row 5c: COR maintenance + size filter + delete
+        batch_ops = QHBoxLayout()   # Row 5a
+        batch_ops.setSpacing(4)
+
+        batch_label = QLabel("Batch")
         batch_label.setStyleSheet("QLabel { font-size: 10.5pt; font-weight:bold; }")
-        batch_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        batch_label.setFixedWidth(97)
         batch_ops.addWidget(batch_label)
-        batch_mach_label = QLabel(" Machine ")
+
+        batch_mach_label = QLabel("Machine")
         batch_mach_label.setStyleSheet("QLabel { font-size: 10.5pt; }")
-        batch_mach_label.setFixedWidth(59)
         batch_ops.addWidget(batch_mach_label)
         self.batch_machine_box = QComboBox()
         self.batch_machine_box.setStyleSheet("QComboBox { font-size: 10.5pt; }")
         self.batch_machine_box.setToolTip("Select machine to run batch reconstructions")
-        self.batch_machine_box.setFixedWidth(62)
+        self.batch_machine_box.setFixedWidth(72)
         self._populate_machine_list()  # Populate dynamically from config
         batch_ops.addWidget(self.batch_machine_box)
+
         batch_gpus = QLabel("GPUs")
         batch_gpus.setStyleSheet("QLabel { font-size: 10.5pt; }")
-        batch_gpus.setFixedWidth(39)
         batch_ops.addWidget(batch_gpus)
         self.batch_gpus_per_machine = QSpinBox()
         self.batch_gpus_per_machine.setMinimum(1)
         self.batch_gpus_per_machine.setMaximum(8)
         self.batch_gpus_per_machine.setValue(1)
         self.batch_gpus_per_machine.setToolTip("Number of GPUs to use on the target machine (1 job per GPU)")
-        self.batch_gpus_per_machine.setFixedWidth(38)
+        self.batch_gpus_per_machine.setFixedWidth(44)
         self.batch_gpus_per_machine.setStyleSheet("QSpinBox { font-size: 10.5pt; }")
         batch_ops.addWidget(self.batch_gpus_per_machine)
 
         # Minimum free VRAM (MiB) required to dispatch a job onto a GPU.
-        # The queue polls nvidia-smi and skips GPUs below this threshold —
-        # if none pass, the job is held and retried next tick instead of
-        # OOM-crashing tomocupy.
         min_vram_lbl = QLabel("min VRAM")
         min_vram_lbl.setStyleSheet("QLabel { font-size: 10.5pt; }")
         min_vram_lbl.setToolTip("Minimum free VRAM (MiB) required on a GPU "
@@ -587,25 +590,12 @@ class TomoGUI(QWidget):
         self.batch_min_free_vram.setSingleStep(1000)
         self.batch_min_free_vram.setValue(8000)
         self.batch_min_free_vram.setSuffix(" MiB")
-        self.batch_min_free_vram.setFixedWidth(90)
+        self.batch_min_free_vram.setFixedWidth(96)
         self.batch_min_free_vram.setStyleSheet("QSpinBox { font-size: 10.5pt; }")
         self.batch_min_free_vram.setToolTip(
             "Minimum free VRAM (MiB) required on a GPU before a job is "
             "dispatched to it. 0 disables the check.")
         batch_ops.addWidget(self.batch_min_free_vram)
-
-        # Overview window for the batch job queue. Read-only observer of
-        # batch_running_jobs + batch_job_queue — clicking this does NOT
-        # touch the queue.
-        show_queue_btn = QPushButton("Show Queue")
-        show_queue_btn.setStyleSheet(
-            "QPushButton { font-size: 10.5pt; }")
-        show_queue_btn.setFixedWidth(105)
-        show_queue_btn.setToolTip(
-            "Open a live overview of every batch job: dataset, machine, "
-            "GPU, type, status. Auto-refreshes while open.")
-        show_queue_btn.clicked.connect(self._show_job_queue)
-        batch_ops.addWidget(show_queue_btn)
 
         # Checkbox for opening remote jobs in terminal
         self.batch_use_terminal = QCheckBox("Terminal")
@@ -614,23 +604,30 @@ class TomoGUI(QWidget):
         self.batch_use_terminal.setStyleSheet("QCheckBox { font-size: 10.5pt; }")
         batch_ops.addWidget(self.batch_use_terminal)
 
-        #TODO: monitor folder and auto recon
-        #monitor_btn = QPushButton("Monitor")
-        #monitor_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
-        #monitor_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        #monitor_btn.setToolTip(f"Auto try or full recon")
-        #monitor_btn.setVisible(False)  # Unavailable
-        #monitor_btn.clicked.connect(self.monitor)#TODO: to implement
-        #batch_ops.addWidget(monitor_btn)
+        batch_ops.addStretch(1)
+
+        # Overview window for the batch job queue.
+        show_queue_btn = QPushButton("Show Queue")
+        show_queue_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
+        show_queue_btn.setToolTip(
+            "Open a live overview of every batch job: dataset, machine, "
+            "GPU, type, status. Auto-refreshes while open.")
+        show_queue_btn.clicked.connect(self._show_job_queue)
+        batch_ops.addWidget(show_queue_btn)
+
+        main_tab.addLayout(batch_ops)
+
+        # ---------- Row 5b: selection + batch run buttons + phase cbs ----
+        batch_ops = QHBoxLayout()
+        batch_ops.setSpacing(4)
+
         select_all_btn = QPushButton("Select all")
         select_all_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
         select_all_btn.clicked.connect(self._batch_select_all)
-        select_all_btn.setFixedWidth(120)
         batch_ops.addWidget(select_all_btn)
         deselect_all_btn = QPushButton("Unselect all")
         deselect_all_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
         deselect_all_btn.clicked.connect(self._batch_deselect_all)
-        deselect_all_btn.setFixedWidth(120)
         batch_ops.addWidget(deselect_all_btn)
         # view_selected_btn = QPushButton("View Selected Data")
         # view_selected_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
@@ -641,11 +638,9 @@ class TomoGUI(QWidget):
         select_donetry_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
         select_donetry_btn.setToolTip("Select files that has done try reconstruction")
         select_donetry_btn.clicked.connect(self._select_done_try)
-        select_donetry_btn.setFixedWidth(135)
         batch_ops.addWidget(select_donetry_btn)
-        separator_batch = QLabel("  |  ")
-        separator_batch.setStyleSheet("QLabel { font-size: 11pt; }")
-        separator_batch.setFixedWidth(23)
+        separator_batch = QLabel(" | ")
+        separator_batch.setStyleSheet("QLabel { font-size: 11pt; color:#666; }")
         batch_ops.addWidget(separator_batch)
         batch_recon_btn =QPushButton("Batch Try")
         batch_recon_btn.setStyleSheet("QPushButton { font-size: 10.5pt; }")
@@ -696,6 +691,12 @@ class TomoGUI(QWidget):
         )
         # Back-compat alias (still read by older code paths / docs).
         self.batch_ai_upload_tomolog = self.batch_ai_phase_tomolog
+        batch_ops.addStretch(1)
+        main_tab.addLayout(batch_ops)
+
+        # ---------- Row 5c: COR maintenance + size filter + delete -------
+        batch_ops = QHBoxLayout()
+        batch_ops.setSpacing(4)
         fix_cor_btn = QPushButton("Fix COR Outliers")
         fix_cor_btn.setStyleSheet("QPushButton { font-size: 10.5pt; color: #8e44ad; }")
         fix_cor_btn.setToolTip("Detect outlier COR values among selected files and replace "
@@ -715,23 +716,20 @@ class TomoGUI(QWidget):
         self.cor_outlier_max.setDecimals(1)
         self.cor_outlier_max.setSingleStep(5.0)
         self.cor_outlier_max.setValue(50.0)
-        self.cor_outlier_max.setFixedWidth(70)
+        self.cor_outlier_max.setFixedWidth(76)
         self.cor_outlier_max.setSuffix(" px")
         self.cor_outlier_max.setToolTip("Maximum allowed |COR − series median| (pixels). "
                                         "Any deviation greater than this is flagged as an outlier. "
                                         "Tight-cluster series may use a smaller effective threshold "
                                         "(max(abs, 5·MAD), capped at this value).")
         batch_ops.addWidget(self.cor_outlier_max)
-        # Per-series minimum size (% of series median). Files smaller than this
-        # are auto-unchecked and marked "Skipped (small)" — typically aborted
-        # scans with tiny file size compared to their series peers.
         batch_ops.addWidget(QLabel("min size:"))
         self.size_min_pct = QDoubleSpinBox()
         self.size_min_pct.setRange(0.0, 100.0)
         self.size_min_pct.setDecimals(0)
         self.size_min_pct.setSingleStep(5.0)
         self.size_min_pct.setValue(50.0)
-        self.size_min_pct.setFixedWidth(60)
+        self.size_min_pct.setFixedWidth(66)
         self.size_min_pct.setSuffix(" %")
         self.size_min_pct.setToolTip(
             "Minimum file size as a % of the series median. "
@@ -740,6 +738,7 @@ class TomoGUI(QWidget):
             "Set to 0 to disable."
         )
         batch_ops.addWidget(self.size_min_pct)
+        batch_ops.addStretch(1)
         delete_sel_btn = QPushButton("Delete Selected")
         delete_sel_btn.setStyleSheet("QPushButton { font-size: 10.5pt; color: #c62828; }")
         delete_sel_btn.setToolTip("Delete the selected HDF5 files from disk (with confirmation)")
@@ -991,8 +990,13 @@ class TomoGUI(QWidget):
             QSlider::handle:horizontal { background: #4CAF50; border: 1px solid #5c5c5c; width: 20px; height: 20px;
                                             margin: -5px 0; border-radius: 10px; }
         """)
+        # Give the slider a horizontal-expanding size policy, otherwise its
+        # natural ~100-px width leaves the groove looking like a tiny stub
+        # with the filename label and all other right-panel widgets eating
+        # the remaining space.
+        self.slice_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         slider_layout.addWidget(QLabel("Image Index:"))
-        slider_layout.addWidget(self.slice_slider)
+        slider_layout.addWidget(self.slice_slider, 1)
         self.filename_label = QLabel("")
         self.filename_label.setStyleSheet("font-size: 10pt; color: #aaa; padding-left: 6px;")
         slider_layout.addWidget(self.filename_label)
@@ -2529,11 +2533,19 @@ class TomoGUI(QWidget):
                 "DIFFERENT architecture from the FINE model — do not "
                 "cross-wire the two paths.")
         add_line_b("--bin-infer-bin-sizes",
-                   placeholder="[24,12]",
-                   tip="Pixel step per bin per refinement stage.")
+                   placeholder="[0.05, 0.0125]",
+                   tip="Bin width per refinement stage, as a FRACTION of the "
+                       "detector width (0.0–1.0). Example on a 1616-px "
+                       "detector: 0.05 → 80.8 px per bin at Level 1, 0.0125 "
+                       "→ 20.2 px per bin at Level 2. Older tomocupy builds "
+                       "took absolute pixels here — stang292/develop rejects "
+                       "any value outside [0, 1].")
         add_line_b("--bin-infer-bin-counts",
-                   placeholder="[4,2]",
-                   tip="Bins per stage (must be even).")
+                   placeholder="[20, 4]",
+                   tip="Number of bins per refinement stage. Must be even. "
+                       "Larger = finer coarse pick but longer run time. "
+                       "Total search span at each stage = bin_count × "
+                       "bin_size × detector_width.")
         add_spin_b("--bin-infer-num-frames", 1, 1024, step=1, default=2,
                    tip="Frames aggregated per bin.")
         add_line_b("--bin-infer-num-windows",
@@ -7026,6 +7038,10 @@ class TomoGUI(QWidget):
         # Every file needs a seed COR that tomocupy's AI can refine around.
         # Precedence: row COR > top-bar COR > centre of the image width
         # (read from /exchange/data.shape[2] of the source H5).
+        # Previously logged one line PER file that fell back to mid-width,
+        # which produced hundreds of near-identical lines on a big batch.
+        # Collect them and summarise instead.
+        midwidth_seeded = []       # [(basename, mid_val), ...]
         for fi in selected_files:
             row_txt = fi['cor_input'].text().strip() if fi.get('cor_input') else ""
             try:
@@ -7039,11 +7055,19 @@ class TomoGUI(QWidget):
                 continue
             mid = self._middle_of_width(fi.get('path'))
             if mid is not None:
-              fi['cor_input'].setText(f"{mid:.1f}")
-              self.log_output.append(
-                  f'<span style="color:#888;">{os.path.basename(fi["path"])}: '
-                    f'no COR — seeding AI with mid-width = {mid:.1f}</span>'
-                )
+                fi['cor_input'].setText(f"{mid:.1f}")
+                midwidth_seeded.append((os.path.basename(fi["path"]), mid))
+        if midwidth_seeded:
+            # Group by the mid-width value so "1061 files at 808.0" is one
+            # line, not 1061. Different detector widths get their own lines.
+            from collections import Counter
+            by_val = Counter(round(v, 1) for _, v in midwidth_seeded)
+            parts = ", ".join(f"{n} file(s) at {v:.1f}"
+                              for v, n in sorted(by_val.items()))
+            self.log_output.append(
+                f'<span style="color:#888;">AI seed fallback (mid-width): '
+                f'{parts}</span>'
+            )
 
         self._batch_active = True
         data_folder = self.data_path.text().strip()
