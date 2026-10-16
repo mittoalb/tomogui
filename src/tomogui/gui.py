@@ -811,7 +811,10 @@ class TomoGUI(QWidget):
         )
         _left_container = QWidget()
         _left_container.setLayout(left_layout)
-        _left_container.setMinimumWidth(300)
+        # 620 keeps the data-folder row (580 px line + Browse buttons) and the
+        # tab headers from clipping on the first paint. User can still drag the
+        # splitter below this once the window is wider than the handle allows.
+        _left_container.setMinimumWidth(620)
         self._main_splitter.addWidget(_left_container)
         main_layout.addWidget(self._main_splitter)
 
@@ -836,10 +839,11 @@ class TomoGUI(QWidget):
             _right_container.setLayout(right_layout)
             _right_container.setMinimumWidth(400)
             self._main_splitter.addWidget(_right_container)
-            self._main_splitter.setStretchFactor(0, 4)
-            self._main_splitter.setStretchFactor(1, 8)
-            # Was [700, 1300] — now −30% on the table, +30% on the preview.
-            self._main_splitter.setSizes([490, 1690])
+            self._main_splitter.setStretchFactor(0, 1)
+            self._main_splitter.setStretchFactor(1, 1)
+            # Start with the controls panel wider than the (empty) preview so
+            # buttons and tab headers aren't clipped on first paint.
+            self._main_splitter.setSizes([1000, 1050])
             self.setLayout(main_layout)
             return
 
@@ -1075,12 +1079,13 @@ class TomoGUI(QWidget):
         _right_container.setLayout(right_layout)
         _right_container.setMinimumWidth(400)
         self._main_splitter.addWidget(_right_container)
-        # Halfway between the original [800, 1200] and the −30% [560, 1560]:
-        # the table gets back some breathing room without losing the preview
-        # gain. User can still drag the handle in either direction.
+        # Even stretch so a wider window grows both sides in step, and start
+        # with the controls panel slightly wider than the preview so the
+        # data-folder row, tab headers and buttons aren't clipped on first
+        # paint. User can still drag the handle to any ratio they like.
         self._main_splitter.setStretchFactor(0, 1)
-        self._main_splitter.setStretchFactor(1, 2)
-        self._main_splitter.setSizes([680, 1380])
+        self._main_splitter.setStretchFactor(1, 1)
+        self._main_splitter.setSizes([1050, 1000])
         self.setLayout(main_layout)
 
         # Apply initial theme after UI is fully built
