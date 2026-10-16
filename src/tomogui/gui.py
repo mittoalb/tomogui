@@ -5041,6 +5041,10 @@ class TomoGUI(QWidget):
         self.slice_slider.valueChanged.connect(self.update_try_slice)
         self._try_proj_name = proj_name
         self.update_try_slice()
+        # Full-range contrast on first paint — the percentile-based default
+        # in show_image() saturates bright out-of-FOV pixels on recons, which
+        # is what the user used to fix by hand with the Reset button.
+        self.reset_img_contrast()
 
     def view_full_reconstruction(self):
         pf = self._preflight_view("Full")
@@ -5113,6 +5117,10 @@ class TomoGUI(QWidget):
         self._current_source_file = os.path.basename(proj_file)
         self._current_view_mode = "full"
         self.update_full_slice()
+        # Full-range contrast on first paint — the percentile-based default
+        # in show_image() saturates bright out-of-FOV pixels on recons, which
+        # is what the user used to fix by hand with the Reset button.
+        self.reset_img_contrast()
 
     def _close_full_h5(self):
         """Close any open full-recon H5 handle. Safe to call repeatedly."""
