@@ -4600,6 +4600,7 @@ class TomoGUI(QWidget):
             "--idy", y,
             "--idz", z,
             "--note", note_value,
+            "--save-format", self._tomolog_save_format(),
         ]
         if vmin:
             cmd.extend(["--min", vmin])
@@ -5624,6 +5625,18 @@ class TomoGUI(QWidget):
         note = self.note_input.text().strip()
         return f'"{note}"' if note else None
 
+    def _tomolog_save_format(self):
+        """Collapse the Data tab's --save-format value (h5nolinks | h5 |
+        h5sino | tiff) into tomolog's {tiff, h5} enum so tomolog reads the
+        right recon files. Without this tomolog defaults to tiff and can't
+        find h5-mode reconstructions."""
+        try:
+            _kind, w, _cb, _default = self.param_widgets['--save-format']
+            val = w.currentText() if hasattr(w, 'currentText') else str(w.text())
+        except (AttributeError, KeyError, TypeError):
+            val = 'h5'
+        return 'tiff' if val.strip().lower() == 'tiff' else 'h5'
+
     def help_tomolog(self):
         """Run the CLI `tomolog run -h` and show output in the GUI log."""
         name = "tomolog-help"
@@ -5735,7 +5748,8 @@ class TomoGUI(QWidget):
                 "--idx", x,
                 "--idy", y,
                 "--idz", z,
-                "--note", note_value
+                "--note", note_value,
+                "--save-format", self._tomolog_save_format(),
             ]
             if auto_contrast:
                 avmin, avmax = self._auto_contrast_for_file(input_fn)
