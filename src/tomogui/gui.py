@@ -855,6 +855,14 @@ class TomoGUI(QWidget):
         self._roi_visual = None
         self._roi_start = None
 
+        # Scale bar state — lazy visual handles created on first draw.
+        self._scalebar_enabled = True
+        self._scalebar_px_size_um = 1.0
+        self._scalebar_vispy_fg = None
+        self._scalebar_vispy_bg = None
+        self._scalebar_pg_fg = None
+        self._scalebar_pg_bg = None
+
         if VISPY_AVAILABLE:
             # --- VisPy canvas (GPU-accelerated, requires OpenGL) ---
             try:
@@ -872,6 +880,16 @@ class TomoGUI(QWidget):
             self.canvas.events.mouse_move.connect(self._on_vispy_mouse_move)
             self.canvas.events.mouse_press.connect(self._on_vispy_mouse_click)
             self.canvas.events.mouse_release.connect(self._on_vispy_mouse_release)
+            # Redraw the scale bar when the user zooms or pans. VisPy's
+            # camera emits transform_change on every rect update, but the
+            # event name is backend-dependent so wrap in try.
+            try:
+                self.view.camera.events.transform_change.connect(
+                    self._update_scalebar)
+            except (AttributeError, KeyError):
+                # Fall back to a mouse-wheel / draw tick hook.
+                self.canvas.events.mouse_wheel.connect(
+                    lambda _ev: self._update_scalebar())
         else:
             # --- PyQtGraph canvas (software renderer, works over SSH X11) ---
             self._pg_image_item = pg.ImageItem()
@@ -888,6 +906,8 @@ class TomoGUI(QWidget):
                 self._pg_image_item.scene().sigMouseMoved,
                 rateLimit=30, slot=self._pg_mouse_moved
             )
+            # Redraw the scale bar when the user zooms or pans.
+            self._pg_view_box.sigRangeChanged.connect(self._update_scalebar)
 
         # Coordinate label
         coord_label = QLabel("(x,y):val ")
@@ -949,6 +969,43 @@ class TomoGUI(QWidget):
         self.max_input.setFixedWidth(65)
         self.max_input.editingFinished.connect(self.update_vmin_vmax)
         toolbar_row.addWidget(self.max_input)
+
+        # --- Scale bar controls -----------------------------------------
+        # Pixel size (µm) seeds the scale-bar auto-length math; prefilled
+        # from the raw HDF5 meta when a file is loaded (see _prefill_pixel_size).
+        self.scalebar_toggle = QCheckBox("Bar")
+        self.scalebar_toggle.setToolTip("Toggle scale bar overlay")
+        self.scalebar_toggle.setChecked(True)
+        self.scalebar_toggle.setStyleSheet("font-size: 11pt;")
+        self.scalebar_toggle.toggled.connect(self._on_scalebar_toggled)
+        toolbar_row.addWidget(self.scalebar_toggle)
+
+        px_label = QLabel(" px(µm)")
+        px_label.setFixedWidth(50)
+        px_label.setStyleSheet("font-size: 11pt;")
+        toolbar_row.addWidget(px_label)
+        self.pixel_size_input = QDoubleSpinBox()
+        self.pixel_size_input.setDecimals(4)
+        self.pixel_size_input.setRange(0.0, 1e6)
+        self.pixel_size_input.setSingleStep(0.1)
+        self.pixel_size_input.setValue(1.0)
+        self.pixel_size_input.setFixedWidth(80)
+        self.pixel_size_input.setStyleSheet("font-size: 11pt;")
+        self.pixel_size_input.setToolTip(
+            "Pixel size in µm (per detector pixel). Auto-filled from the "
+            "HDF5 /measurement/instrument/detection_system/objective/resolution "
+            "key when available."
+        )
+        self.pixel_size_input.valueChanged.connect(self._on_pixel_size_changed)
+        toolbar_row.addWidget(self.pixel_size_input)
+
+        self.scalebar_length_label = QLabel("—")
+        self.scalebar_length_label.setFixedWidth(55)
+        self.scalebar_length_label.setStyleSheet(
+            "font-size: 11pt; color: #888;"
+        )
+        self.scalebar_length_label.setToolTip("Current scale-bar length")
+        toolbar_row.addWidget(self.scalebar_length_label)
 
         # Theme toggle button
         self.theme_toggle_btn = QPushButton("" if self.theme_manager.get_current_theme() == 'bright' else "")
@@ -5007,6 +5064,7 @@ class TomoGUI(QWidget):
         if pf is None:
             return
         data_folder, proj_file, proj_name = pf
+        self._prefill_pixel_size(proj_file)
 
         try_dir = os.path.join(f"{data_folder}_rec", "try_center", proj_name)
         preview_files = sorted(glob.glob(os.path.join(try_dir, "*.tiff")))
@@ -5052,6 +5110,7 @@ class TomoGUI(QWidget):
         if pf is None:
             return
         data_folder, proj_file, proj_name = pf
+        self._prefill_pixel_size(proj_file)
 
         info = self._resolve_full_recon(data_folder, proj_name)
 
@@ -5256,6 +5315,10 @@ class TomoGUI(QWidget):
 
     def _on_vispy_mouse_release(self, event):
         """Handle mouse release for ROI drawing"""
+        # Refresh the scale bar after every pan/zoom release, even when
+        # we're not drawing an ROI — covers the case where the camera
+        # events hook couldn't be connected.
+        self._update_scalebar()
         if not self._drawing_roi or self._roi_start is None:
             return
 
@@ -5463,6 +5526,174 @@ class TomoGUI(QWidget):
                 self._pg_apply_levels(self.vmin, self.vmax)
                 self._pg_view_box.autoRange()
 
+    # ===== SCALE BAR =====
+
+    @staticmethod
+    def _nice_round(x):
+        """Nearest {1, 2, 5} × 10^n not exceeding x. 500 µm beats 487."""
+        import math
+        if x <= 0:
+            return 1.0
+        exp = math.floor(math.log10(x))
+        frac = x / (10.0 ** exp)
+        for n in (5, 2, 1):
+            if frac >= n:
+                return n * (10.0 ** exp)
+        return 10.0 ** exp
+
+    def _read_pixel_size_from_h5(self, h5_path):
+        """Return pixel size in µm from the raw HDF5, or None.
+
+        Prefers the projection resolution key (already includes objective
+        magnification). Falls back to the bare detector pixel size, which
+        is a sensor-pixel value — reasonable default when no objective
+        resolution is stored.
+        """
+        if not h5_path or not isinstance(h5_path, str):
+            return None
+        if not h5_path.lower().endswith(('.h5', '.hdf', '.hdf5')):
+            return None
+        try:
+            with h5py.File(h5_path, 'r', locking=False) as f:
+                for key in (
+                    '/measurement/instrument/detection_system/objective/resolution',
+                    '/measurement/instrument/detector/pixel_size',
+                ):
+                    if key not in f:
+                        continue
+                    try:
+                        val = f[key][()]
+                        v = float(val if np.ndim(val) == 0 else val[0])
+                        if v > 0:
+                            return v
+                    except (TypeError, ValueError):
+                        continue
+        except (OSError, KeyError):
+            return None
+        return None
+
+    def _prefill_pixel_size(self, h5_path):
+        """Called from the view handlers. Silent on failure — user can
+        type a value by hand. Blocks the spinbox signal so this doesn't
+        trigger a redraw before the image is actually on-screen."""
+        px = self._read_pixel_size_from_h5(h5_path)
+        if px is None:
+            return
+        try:
+            self.pixel_size_input.blockSignals(True)
+            self.pixel_size_input.setValue(px)
+        finally:
+            self.pixel_size_input.blockSignals(False)
+        self._scalebar_px_size_um = px
+
+    def _on_pixel_size_changed(self, value):
+        self._scalebar_px_size_um = float(value or 0)
+        self._update_scalebar()
+
+    def _on_scalebar_toggled(self, checked):
+        self._scalebar_enabled = bool(checked)
+        if not self._scalebar_enabled:
+            self._hide_scalebar()
+            self.scalebar_length_label.setText("—")
+        else:
+            self._update_scalebar()
+
+    def _hide_scalebar(self):
+        for vis in (self._scalebar_vispy_fg, self._scalebar_vispy_bg):
+            if vis is not None:
+                try:
+                    vis.visible = False
+                except Exception:
+                    pass
+        for item in (self._scalebar_pg_fg, self._scalebar_pg_bg):
+            if item is not None:
+                try:
+                    item.setVisible(False)
+                except Exception:
+                    pass
+
+    def _update_scalebar(self, *_args):
+        """Pick a nice round length that covers ~15% of the visible width
+        in µm, then draw a lower-right bar of that length. Called after
+        every image load and after zoom/pan changes."""
+        if not getattr(self, '_scalebar_enabled', True):
+            return
+        if getattr(self, '_current_img', None) is None:
+            self._hide_scalebar()
+            return
+        px_size = float(getattr(self, '_scalebar_px_size_um', 0) or 0)
+        if px_size <= 0:
+            self._hide_scalebar()
+            self.scalebar_length_label.setText("—")
+            return
+
+        if VISPY_AVAILABLE and hasattr(self, 'view'):
+            rect = self.view.camera.rect
+            vx = float(rect.width)
+            vy = float(rect.height)
+            x_right = float(rect.left) + vx
+            y_bottom = float(rect.top) + vy
+        elif hasattr(self, '_pg_view_box'):
+            (xmin, xmax), (ymin, ymax) = self._pg_view_box.viewRange()
+            vx = xmax - xmin
+            vy = ymax - ymin
+            x_right = xmax
+            y_bottom = ymax
+        else:
+            return
+        if vx <= 0 or vy <= 0:
+            self._hide_scalebar()
+            return
+
+        bar_um = self._nice_round(vx * px_size * 0.15)
+        bar_px = bar_um / px_size
+        # Margin in image pixels — 4 % of the visible width / 6 % of height
+        # keeps the bar off the edge whatever the aspect ratio.
+        mx = vx * 0.04
+        my = vy * 0.06
+        x1 = x_right - mx
+        x0 = x1 - bar_px
+        y = y_bottom - my
+
+        if VISPY_AVAILABLE and hasattr(self, 'view'):
+            pts = np.array([[x0, y], [x1, y]], dtype=float)
+            if self._scalebar_vispy_fg is None:
+                self._scalebar_vispy_bg = visuals.Line(
+                    pos=pts, color='black', width=7, method='agg',
+                    parent=self.view.scene)
+                self._scalebar_vispy_fg = visuals.Line(
+                    pos=pts, color='white', width=4, method='agg',
+                    parent=self.view.scene)
+            else:
+                self._scalebar_vispy_bg.set_data(pos=pts)
+                self._scalebar_vispy_fg.set_data(pos=pts)
+                self._scalebar_vispy_bg.visible = True
+                self._scalebar_vispy_fg.visible = True
+        elif hasattr(self, '_pg_view_box'):
+            if self._scalebar_pg_fg is None:
+                self._scalebar_pg_bg = pg.PlotCurveItem(
+                    x=[x0, x1], y=[y, y], pen=pg.mkPen('k', width=7))
+                self._scalebar_pg_fg = pg.PlotCurveItem(
+                    x=[x0, x1], y=[y, y], pen=pg.mkPen('w', width=4))
+                self._scalebar_pg_bg.setZValue(100)
+                self._scalebar_pg_fg.setZValue(101)
+                self._pg_view_box.addItem(self._scalebar_pg_bg, ignoreBounds=True)
+                self._pg_view_box.addItem(self._scalebar_pg_fg, ignoreBounds=True)
+            else:
+                self._scalebar_pg_bg.setData(x=[x0, x1], y=[y, y])
+                self._scalebar_pg_fg.setData(x=[x0, x1], y=[y, y])
+                self._scalebar_pg_bg.setVisible(True)
+                self._scalebar_pg_fg.setVisible(True)
+
+        # Tidy label: whole µm below 1000, otherwise mm.
+        if bar_um >= 1000:
+            text = f"{bar_um / 1000:g} mm"
+        elif bar_um >= 1:
+            text = f"{bar_um:g} µm"
+        else:
+            text = f"{bar_um:g} µm"
+        self.scalebar_length_label.setText(text)
+
     def update_raw_slice(self):
         idx = self.slice_slider.value()
         self._remember_view()
@@ -5573,6 +5804,7 @@ class TomoGUI(QWidget):
             except Exception:
                 pass
             self._last_image_shape = (h, w)
+            self._update_scalebar()
             return
 
         # --- VisPy path ---
@@ -5596,6 +5828,9 @@ class TomoGUI(QWidget):
         self._last_image_shape = (h, w)
 
         self.canvas.update()
+        # Draw after the camera rect has settled so the bar sits in the
+        # right corner for the current zoom level.
+        self._update_scalebar()
 
 
 
