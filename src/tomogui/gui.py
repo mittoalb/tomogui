@@ -855,13 +855,14 @@ class TomoGUI(QWidget):
         self._roi_visual = None
         self._roi_start = None
 
-        # Scale bar state — lazy visual handles created on first draw.
+        # Scale bar state — rendered as a Qt overlay on top of the canvas
+        # widget so it's independent of whichever renderer (VisPy, pyqtgraph)
+        # draws the image. The underlying visuals-based approach silently
+        # no-ops on several VisPy driver combinations.
         self._scalebar_enabled = True
         self._scalebar_px_size_um = 1.0
-        self._scalebar_vispy_fg = None
-        self._scalebar_vispy_bg = None
-        self._scalebar_pg_fg = None
-        self._scalebar_pg_bg = None
+        self._scalebar_bar_widget = None
+        self._scalebar_text_widget = None
 
         if VISPY_AVAILABLE:
             # --- VisPy canvas (GPU-accelerated, requires OpenGL) ---
@@ -980,8 +981,8 @@ class TomoGUI(QWidget):
         self.scalebar_toggle.toggled.connect(self._on_scalebar_toggled)
         toolbar_row.addWidget(self.scalebar_toggle)
 
-        px_label = QLabel(" px(µm)")
-        px_label.setFixedWidth(50)
+        px_label = QLabel(" µm/px")
+        px_label.setFixedWidth(55)
         px_label.setStyleSheet("font-size: 11pt;")
         toolbar_row.addWidget(px_label)
         self.pixel_size_input = QDoubleSpinBox()
@@ -1026,6 +1027,8 @@ class TomoGUI(QWidget):
         self.canvas_widget.installEventFilter(self)
 
         canvas_slider_frame = QVBoxLayout()
+        canvas_slider_frame.setSpacing(2)
+        canvas_slider_frame.setContentsMargins(0, 0, 0, 0)
         if not VISPY_AVAILABLE:
             # Histogram LUT widget for manual level adjustment (pyqtgraph only)
             self._pg_hist = pg.HistogramLUTWidget(orientation='vertical')
@@ -1039,24 +1042,26 @@ class TomoGUI(QWidget):
             canvas_slider_frame.addLayout(canvas_row)
         else:
             canvas_slider_frame.addWidget(self.canvas_widget)
-        slider_layout = QHBoxLayout()
+        # Image Index: slider on its own row (full-width), filename as a
+        # small line underneath — frees the slider to span the whole panel
+        # and keeps both rows tight so the image gets the vertical back.
         self.slice_slider = QSlider(Qt.Horizontal)
         self.slice_slider.setStyleSheet("""
-            QSlider::groove:horizontal { height: 20px; background: #ccc; border-radius: 5px; }
-            QSlider::handle:horizontal { background: #4CAF50; border: 1px solid #5c5c5c; width: 20px; height: 20px;
-                                            margin: -5px 0; border-radius: 10px; }
+            QSlider::groove:horizontal { height: 6px; background: #ccc; border-radius: 3px; }
+            QSlider::handle:horizontal { background: #4CAF50; border: 1px solid #5c5c5c; width: 12px; height: 12px;
+                                            margin: -3px 0; border-radius: 6px; }
         """)
-        # Give the slider a horizontal-expanding size policy, otherwise its
-        # natural ~100-px width leaves the groove looking like a tiny stub
-        # with the filename label and all other right-panel widgets eating
-        # the remaining space.
+        self.slice_slider.setFixedHeight(14)
         self.slice_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        slider_layout.addWidget(QLabel("Image Index:"))
-        slider_layout.addWidget(self.slice_slider, 1)
+        canvas_slider_frame.addWidget(self.slice_slider)
+
         self.filename_label = QLabel("")
-        self.filename_label.setStyleSheet("font-size: 10pt; color: #aaa; padding-left: 6px;")
-        slider_layout.addWidget(self.filename_label)
-        canvas_slider_frame.addLayout(slider_layout)
+        self.filename_label.setStyleSheet(
+            "font-size: 9pt; color: #aaa; padding: 0px;"
+        )
+        self.filename_label.setFixedHeight(14)
+        self.filename_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        canvas_slider_frame.addWidget(self.filename_label)
         right_layout.addLayout(canvas_slider_frame, 8)
 
         # Tomolog section
@@ -3010,6 +3015,10 @@ class TomoGUI(QWidget):
             new_val = max(0, min(self.slice_slider.maximum(), new_val))
             self.slice_slider.setValue(new_val)
             return True
+        # Keep the scale-bar overlay pinned to the lower-right whenever
+        # the canvas is resized (user drags the splitter, maximises, etc.).
+        if obj == self.canvas_widget and event.type() == QEvent.Resize:
+            self._update_scalebar()
         return super().eventFilter(obj, event)
 
     def browse_data_folder(self):
@@ -5599,24 +5608,42 @@ class TomoGUI(QWidget):
             self._update_scalebar()
 
     def _hide_scalebar(self):
-        for vis in (self._scalebar_vispy_fg, self._scalebar_vispy_bg):
-            if vis is not None:
+        for w in (self._scalebar_bar_widget, self._scalebar_text_widget):
+            if w is not None:
                 try:
-                    vis.visible = False
-                except Exception:
-                    pass
-        for item in (self._scalebar_pg_fg, self._scalebar_pg_bg):
-            if item is not None:
-                try:
-                    item.setVisible(False)
+                    w.hide()
                 except Exception:
                     pass
 
+    def _ensure_scalebar_widgets(self):
+        if self._scalebar_bar_widget is not None:
+            return
+        parent = getattr(self, 'canvas_widget', None)
+        if parent is None:
+            return
+        self._scalebar_bar_widget = QLabel(parent)
+        self._scalebar_bar_widget.setStyleSheet(
+            "background-color: white; border: 1px solid black;"
+        )
+        self._scalebar_bar_widget.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._scalebar_text_widget = QLabel(parent)
+        self._scalebar_text_widget.setStyleSheet(
+            "color: white; background-color: rgba(0,0,0,170); "
+            "padding: 1px 5px; font-size: 10pt; font-weight: bold; "
+            "border: 1px solid black;"
+        )
+        self._scalebar_text_widget.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._scalebar_text_widget.setAlignment(Qt.AlignCenter)
+        self._scalebar_bar_widget.raise_()
+        self._scalebar_text_widget.raise_()
+
     def _update_scalebar(self, *_args):
-        """Pick a nice round length that covers ~15% of the visible width
-        in µm, then draw a lower-right bar of that length. Called after
-        every image load and after zoom/pan changes."""
+        """Pick a round length that covers ~15% of the visible width in µm
+        and draw a Qt-overlay bar at the lower-right of the canvas widget.
+        Overlay approach rather than OpenGL visuals because several VisPy
+        driver combinations silently drop custom visuals."""
         if not getattr(self, '_scalebar_enabled', True):
+            self._hide_scalebar()
             return
         if getattr(self, '_current_img', None) is None:
             self._hide_scalebar()
@@ -5626,72 +5653,73 @@ class TomoGUI(QWidget):
             self._hide_scalebar()
             self.scalebar_length_label.setText("—")
             return
+        parent = getattr(self, 'canvas_widget', None)
+        if parent is None:
+            return
+
+        # How many screen pixels does one DATA pixel currently occupy?
+        # Image fits the view with aspect=1 lock, so computing from height
+        # (which actually fills the viewport) is more reliable than width.
+        img_h, img_w = self._current_img.shape[:2]
+        canvas_w = parent.width()
+        canvas_h = parent.height()
+        if canvas_w <= 0 or canvas_h <= 0 or img_h <= 0 or img_w <= 0:
+            return
 
         if VISPY_AVAILABLE and hasattr(self, 'view'):
             rect = self.view.camera.rect
-            vx = float(rect.width)
-            vy = float(rect.height)
-            x_right = float(rect.left) + vx
-            y_bottom = float(rect.top) + vy
+            data_w = float(rect.width) if rect.width > 0 else float(img_w)
+            data_h = float(rect.height) if rect.height > 0 else float(img_h)
         elif hasattr(self, '_pg_view_box'):
             (xmin, xmax), (ymin, ymax) = self._pg_view_box.viewRange()
-            vx = xmax - xmin
-            vy = ymax - ymin
-            x_right = xmax
-            y_bottom = ymax
+            data_w = max(1e-9, xmax - xmin)
+            data_h = max(1e-9, ymax - ymin)
         else:
+            data_w = float(img_w)
+            data_h = float(img_h)
+
+        # aspect=1 → whichever axis is the limiting dimension decides the
+        # on-screen scale. Use min so the bar reflects the true px/µm ratio.
+        screen_per_data = min(canvas_w / data_w, canvas_h / data_h)
+        if screen_per_data <= 0:
+            self._hide_scalebar()
             return
-        if vx <= 0 or vy <= 0:
+        um_per_screen_px = px_size / screen_per_data
+        if um_per_screen_px <= 0:
             self._hide_scalebar()
             return
 
-        bar_um = self._nice_round(vx * px_size * 0.15)
-        bar_px = bar_um / px_size
-        # Margin in image pixels — 4 % of the visible width / 6 % of height
-        # keeps the bar off the edge whatever the aspect ratio.
-        mx = vx * 0.04
-        my = vy * 0.06
-        x1 = x_right - mx
-        x0 = x1 - bar_px
-        y = y_bottom - my
+        # Target ~15 % of the canvas width in µm, snap to a nice round value.
+        bar_um = self._nice_round(canvas_w * 0.15 * um_per_screen_px)
+        bar_screen_w = max(20, int(round(bar_um / um_per_screen_px)))
+        bar_screen_h = 6
 
-        if VISPY_AVAILABLE and hasattr(self, 'view'):
-            pts = np.array([[x0, y], [x1, y]], dtype=float)
-            if self._scalebar_vispy_fg is None:
-                self._scalebar_vispy_bg = visuals.Line(
-                    pos=pts, color='black', width=7, method='agg',
-                    parent=self.view.scene)
-                self._scalebar_vispy_fg = visuals.Line(
-                    pos=pts, color='white', width=4, method='agg',
-                    parent=self.view.scene)
-            else:
-                self._scalebar_vispy_bg.set_data(pos=pts)
-                self._scalebar_vispy_fg.set_data(pos=pts)
-                self._scalebar_vispy_bg.visible = True
-                self._scalebar_vispy_fg.visible = True
-        elif hasattr(self, '_pg_view_box'):
-            if self._scalebar_pg_fg is None:
-                self._scalebar_pg_bg = pg.PlotCurveItem(
-                    x=[x0, x1], y=[y, y], pen=pg.mkPen('k', width=7))
-                self._scalebar_pg_fg = pg.PlotCurveItem(
-                    x=[x0, x1], y=[y, y], pen=pg.mkPen('w', width=4))
-                self._scalebar_pg_bg.setZValue(100)
-                self._scalebar_pg_fg.setZValue(101)
-                self._pg_view_box.addItem(self._scalebar_pg_bg, ignoreBounds=True)
-                self._pg_view_box.addItem(self._scalebar_pg_fg, ignoreBounds=True)
-            else:
-                self._scalebar_pg_bg.setData(x=[x0, x1], y=[y, y])
-                self._scalebar_pg_fg.setData(x=[x0, x1], y=[y, y])
-                self._scalebar_pg_bg.setVisible(True)
-                self._scalebar_pg_fg.setVisible(True)
+        self._ensure_scalebar_widgets()
+        if self._scalebar_bar_widget is None:
+            return
 
-        # Tidy label: whole µm below 1000, otherwise mm.
-        if bar_um >= 1000:
-            text = f"{bar_um / 1000:g} mm"
-        elif bar_um >= 1:
-            text = f"{bar_um:g} µm"
-        else:
-            text = f"{bar_um:g} µm"
+        text = (f"{bar_um / 1000:g} mm"
+                if bar_um >= 1000 else f"{bar_um:g} µm")
+        self._scalebar_text_widget.setText(text)
+        self._scalebar_text_widget.adjustSize()
+
+        margin = 10
+        bar_w = min(bar_screen_w, canvas_w - 2 * margin)
+        bar_x = canvas_w - margin - bar_w
+        bar_y = canvas_h - margin - bar_screen_h
+        self._scalebar_bar_widget.setFixedSize(bar_w, bar_screen_h)
+        self._scalebar_bar_widget.move(bar_x, bar_y)
+
+        text_w = self._scalebar_text_widget.width()
+        text_h = self._scalebar_text_widget.height()
+        text_x = canvas_w - margin - max(text_w, bar_w) + (max(text_w, bar_w) - text_w) // 2
+        text_y = bar_y - text_h - 2
+        self._scalebar_text_widget.move(max(margin, text_x), max(margin, text_y))
+
+        self._scalebar_bar_widget.show()
+        self._scalebar_text_widget.show()
+        self._scalebar_bar_widget.raise_()
+        self._scalebar_text_widget.raise_()
         self.scalebar_length_label.setText(text)
 
     def update_raw_slice(self):
